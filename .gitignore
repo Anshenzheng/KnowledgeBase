@@ -1,0 +1,68 @@
+# ==========================================
+# 1. 通用/IDE 配置
+# ==========================================
+.idea/
+.vscode/
+*.swp
+*.bak
+*.tmp
+.DS_Store
+Thumbs.db
+
+# ==========================================
+# 2. 后端配置 (Java/Maven/Spring Boot)
+# ==========================================
+# 编译后的类文件
+backend/**/*.class
+backend/**/target/
+backend/**/bin/
+
+# 日志文件
+backend/**/logs/
+backend/**/*.log
+
+# Maven 属性文件
+backend/.mvn/wrapper/maven-wrapper.jar
+backend/release.properties
+backend/pom.xml.tag
+backend/pom.xml.releaseBackup
+backend/pom.xml.backup
+backend/pom.xml.versionsBackup
+
+# Gradle 缓存
+backend/.gradle/
+backend/build/
+
+# ==========================================
+# 3. 前端配置 (Node/Angular)
+# ==========================================
+# 依赖
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+
+# 日志与缓存
+frontend/*.log
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.eslintcache
+frontend/.cache/
+
+# 单元测试与覆盖率
+frontend/coverage/
+frontend/.nyc_output/
+
+# 环境变量 (包含敏感信息)
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# ==========================================
+# 4. 其他 (构建产物)
+# ==========================================
+# 如果有打包后的产物
+*.jar
+*.war
+*.zip
+*.tar.gz
