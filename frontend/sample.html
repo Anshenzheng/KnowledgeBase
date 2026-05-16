@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Platform - Task Management</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            /* 经典企业级冷色系 */
+            --bg-base: #f0f2f5;
+            --bg-sidebar: #ffffff;
+            --bg-container: #ffffff;
+            
+            /* 语义与品牌色 */
+            --color-primary: #1677ff;
+            --color-primary-hover: #4096ff;
+            --color-primary-light: #e6f4ff;
+            
+            /* 文本颜色分级 */
+            --text-heading: #1f1f1f;
+            --text-main: #434343;
+            --text-secondary: #8c8c8c;
+            
+            /* 边框与分割线 */
+            --border-color: #d9d9d9;
+            --border-light: #f0f0f0;
+            
+            /* 标准状态色 */
+            --status-blue: #0958d9;
+            --status-blue-bg: #e6f4ff;
+            --status-blue-border: #91caee;
+            
+            --status-red: #cf1322;
+            --status-red-bg: #fff1f0;
+            --status-red-border: #ffa39e;
+            
+            --status-green: #389e0d;
+            --status-green-bg: #f6ffed;
+            --status-green-border: #b7eb8f;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            font-size: 14px;
+            color: var(--text-main);
+            background-color: var(--bg-base);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* --- 侧边导航栏 (Ant Design 风格) --- */
+        .sidebar {
+            width: 220px;
+            background: var(--bg-sidebar);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-logo {
+            height: 56px;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-heading);
+            border-bottom: 1px solid var(--border-light);
+            gap: 10px;
+        }
+
+        .sidebar-logo i {
+            color: var(--color-primary);
+        }
+
+        .menu-list {
+            list-style: none;
+            padding: 12px 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .menu-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 16px;
+            color: var(--text-main);
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 400;
+            transition: all 0.2s;
+        }
+
+        .menu-item:hover {
+            background-color: var(--border-light);
+            color: var(--text-heading);
+        }
+
+        .menu-item.active {
+            background-color: var(--color-primary-light);
+            color: var(--color-primary);
+            font-weight: 500;
+        }
+
+        /* --- 主内容区 --- */
+        .main-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .main-header {
+            height: 56px;
+            background: #ffffff;
+            border-bottom: 1px solid var(--border-light);
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+        }
+
+        .page-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-heading);
+        }
+
+        .content-body {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* --- 数据筛选区 --- */
+        .filter-bar {
+            background: #ffffff;
+            padding: 16px;
+            border-radius: 6px;
+            border: 1px solid var(--border-light);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .filter-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-item label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .filter-item select {
+            height: 32px;
+            min-width: 140px;
+            padding: 0 10px;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+            background-color: #fff;
+            color: var(--text-main);
+            outline: none;
+            font-size: 14px;
+        }
+
+        .filter-item select:focus {
+            border-color: var(--color-primary);
+        }
+
+        .btn-action-default {
+            height: 32px;
+            padding: 0 16px;
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-main);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn-action-default:hover {
+            color: var(--color-primary);
+            border-color: var(--color-primary);
+        }
+
+        /* --- 标准 B 端数据表格 --- */
+        .table-container {
+            background: #ffffff;
+            border-radius: 6px;
+            border: 1px solid var(--border-light);
+            overflow: hidden;
+        }
+
+        .table-responsive {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            table-layout: fixed;
+        }
+
+        th {
+            background: #fafafa;
+            padding: 12px 16px;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-heading);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-light);
+            font-size: 14px;
+            word-break: break-all;
+            white-space: normal;
+        }
+
+        tr:hover td {
+            background-color: #fafafa;
+        }
+
+        /* 结构列布局 */
+        .task-column-name {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .btn-toggle-expand {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding-top: 2px;
+        }
+
+        .btn-toggle-expand:hover {
+            color: var(--text-heading);
+        }
+
+        .task-detail {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .task-title {
+            color: var(--text-heading);
+            font-weight: 400;
+            line-height: 1.5;
+        }
+
+        .task-source {
+            font-size: 12px;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* 标准化状态标签 */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            font-size: 12px;
+            border-radius: 4px;
+            font-weight: 400;
+            border: 1px solid transparent;
+        }
+
+        .badge.running {
+            color: var(--status-blue);
+            background-color: var(--status-blue-bg);
+            border-color: var(--status-blue-border);
+        }
+
+        .badge.failed {
+            color: var(--status-red);
+            background-color: var(--status-red-bg);
+            border-color: var(--status-red-border);
+        }
+
+        .badge.success {
+            color: var(--status-green);
+            background-color: var(--status-green-bg);
+            border-color: var(--status-green-border);
+        }
+
+        /* 紧凑进度条 */
+        .cell-progress {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .progress-track {
+            flex: 1;
+            height: 6px;
+            background-color: #f5f5f5;
+            border-radius: 100px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: var(--color-primary);
+            border-radius: 100px;
+        }
+
+        .progress-fill.none {
+            background-color: #d9d9d9;
+        }
+
+        .progress-num {
+            font-size: 12px;
+            color: var(--text-secondary);
+            min-width: 70px;
+            text-align: right;
+        }
+
+        /* 工具操作按钮组 */
+        .operation-group {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .btn-link-action {
+            background: none;
+            border: none;
+            color: var(--color-primary);
+            cursor: pointer;
+            font-size: 14px;
+            padding: 0;
+            transition: color 0.2s;
+        }
+
+        .btn-link-action:hover {
+            color: var(--color-primary-hover);
+        }
+        
+        .btn-link-action.disabled {
+            color: #bfbfbf;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+
+    <nav class="sidebar">
+        <div class="sidebar-logo">
+            <i class="fa-solid fa-cube"></i>
+            <span>知识仓库 Agent</span>
+        </div>
+        <ul class="menu-list">
+            <li><a href="#" class="menu-item"><i class="fa-regular fa-comment-dots"></i>智能对话</a></li>
+            <li><a href="#" class="menu-item"><i class="fa-solid fa-folder-plus"></i>知识库导入</a></li>
+            <li><a href="#" class="menu-item active"><i class="fa-regular fa-list-alt"></i>导入任务</a></li>
+            <li><a href="#" class="menu-item"><i class="fa-solid fa-sliders"></i>模型配置</a></li>
+        </ul>
+    </nav>
+
+    <main class="main-container">
+        <header class="main-header">
+            <h1 class="page-title">导入任务</h1>
+        </header>
+
+        <div class="content-body">
+            <section class="filter-bar">
+                <div class="filter-item">
+                    <label>状态筛选</label>
+                    <select>
+                        <option>全部状态</option>
+                        <option>运行中</option>
+                        <option>失败</option>
+                        <option>已完成</option>
+                    </select>
+                </div>
+                <div class="filter-item">
+                    <label>类型筛选</label>
+                    <select>
+                        <option>全部类型</option>
+                        <option>网页</option>
+                        <option>本地文件</option>
+                    </select>
+                </div>
+                <button class="btn-action-default">
+                    <i class="fa-solid fa-rotate"></i>刷新
+                </button>
+            </section>
+
+            <section class="table-container">
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 45%;">任务名称</th>
+                                <th style="width: 15%;">状态</th>
+                                <th style="width: 22%;">进度</th>
+                                <th style="width: 18%;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <div class="task-column-name">
+                                        <button class="btn-toggle-expand"><i class="fa-solid fa-caret-down"></i></button>
+                                        <div class="task-detail">
+                                            <div class="task-title">谷歌刚刚发布 AI Agent 白皮书</div>
+                                            <div class="task-source"><i class="fa-solid fa-globe"></i> 网页</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="badge running">运行中</span></td>
+                                <td>
+                                    <div class="cell-progress">
+                                        <div class="progress-track">
+                                            <div class="progress-fill" style="width: 45%;"></div>
+                                        </div>
+                                        <div class="progress-num">31 / 68 (45%)</div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="operation-group">
+                                        <button class="btn-link-action" title="暂停"><i class="fa-solid fa-pause"></i></button>
+                                        <button class="btn-link-action" title="查看日志"><i class="fa-regular fa-file-code"></i></button>
+                                        <button class="btn-link-action" title="详情"><i class="fa-solid fa-circle-info"></i></button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div class="task-column-name">
+                                        <button class="btn-toggle-expand"><i class="fa-solid fa-caret-down"></i></button>
+                                        <div class="task-detail">
+                                            <div class="task-title">Web Import: https://ex.chinadaily.com.cn/exchange/partners/82/rss/channel/cn/columns/sz8srm/stories/WS6944e578a310942cc49977a9.html</div>
+                                            <div class="task-source"><i class="fa-solid fa-globe"></i> 网页</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="badge failed">失败</span></td>
+                                <td>
+                                    <div class="cell-progress">
+                                        <div class="progress-track"><div class="progress-fill none" style="width: 0%;"></div></div>
+                                        <div class="progress-num">-</div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="operation-group">
+                                        <button class="btn-link-action" title="重试"><i class="fa-solid fa-rotate-right"></i></button>
+                                        <button class="btn-link-action" title="错误日志" style="color: var(--status-red);"><i class="fa-solid fa-bug"></i></button>
+                                        <button class="btn-link-action" title="详情"><i class="fa-solid fa-circle-info"></i></button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div class="task-column-name">
+                                        <button class="btn-toggle-expand"><i class="fa-solid fa-caret-down"></i></button>
+                                        <div class="task-detail">
+                                            <div class="task-title">File Upload: test_pgvector.txt</div>
+                                            <div class="task-source"><i class="fa-regular fa-file-alt"></i> 本地文件</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="badge success">已完成</span></td>
+                                <td>
+                                    <div class="cell-progress">
+                                        <div class="progress-track">
+                                            <div class="progress-fill" style="width: 100%; background-color: var(--status-green);"></div>
+                                        </div>
+                                        <div class="progress-num">1 / 1 (100%)</div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="operation-group">
+                                        <button class="btn-link-action disabled" title="无需操作" disabled><i class="fa-solid fa-play"></i></button>
+                                        <button class="btn-link-action" title="清除缓存"><i class="fa-regular fa-trash-can"></i></button>
+                                        <button class="btn-link-action" title="详情"><i class="fa-solid fa-circle-info"></i></button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </main>
+
+</body>
+</html>

@@ -1,5 +1,5 @@
 # ==========================================
-# 1. 通用/IDE 配置
+# 通用/IDE 配置
 # ==========================================
 .idea/
 .vscode/
@@ -8,33 +8,45 @@
 *.tmp
 .DS_Store
 Thumbs.db
+*.orig
 
 # ==========================================
-# 2. 后端配置 (Java/Maven/Spring Boot)
+# 后端配置 (Python/FastAPI)
 # ==========================================
-# 编译后的类文件
-backend/**/*.class
-backend/**/target/
-backend/**/bin/
+# Python 缓存
+backend/**/*.pyc
+backend/__pycache__/
+backend/**/*.pyo
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/*.egg-info/
+backend/*.egg
+
+# 虚拟环境
+backend/venv/
+backend/.venv/
+backend/env/
+backend/.env/
+
+# 环境变量（但保留 .env.example）
+backend/.env
+backend/.env.local
+backend/.env.production
 
 # 日志文件
-backend/**/logs/
-backend/**/*.log
+backend/logs/
+backend/*.log
 
-# Maven 属性文件
-backend/.mvn/wrapper/maven-wrapper.jar
-backend/release.properties
-backend/pom.xml.tag
-backend/pom.xml.releaseBackup
-backend/pom.xml.backup
-backend/pom.xml.versionsBackup
+# 上传和存储文件
+backend/uploads/
+backend/storage/
 
-# Gradle 缓存
-backend/.gradle/
-backend/build/
+# 数据库文件（PostgreSQL 数据除外）
+backend/*.sqlite3
+backend/*.db
 
 # ==========================================
-# 3. 前端配置 (Node/Angular)
+# 前端配置 (Node/Angular)
 # ==========================================
 # 依赖
 frontend/node_modules/
@@ -49,20 +61,96 @@ frontend/yarn-error.log*
 frontend/.eslintcache
 frontend/.cache/
 
-# 单元测试与覆盖率
-frontend/coverage/
-frontend/.nyc_output/
-
-# 环境变量 (包含敏感信息)
-frontend/.env
-frontend/.env.*
-!frontend/.env.example
+# 构建产物
+frontend/www/
+frontend/.ng_build/
 
 # ==========================================
-# 4. 其他 (构建产物)
+# 数据库配置
 # ==========================================
-# 如果有打包后的产物
-*.jar
-*.war
-*.zip
-*.tar.gz
+# 数据库备份和导出（PostgreSQL 数据目录除外）
+*.sql
+*.db
+*.sqlite
+*.sqlite3
+
+# ==========================================
+# 敏感信息
+# ==========================================
+# API Keys 和密钥
+**/.env
+**/.env.local
+**/.env.production
+**/secrets/
+**/keys/
+**/*.key
+**/*.pem
+**/*.crt
+
+# ==========================================
+# 构建产物
+# ==========================================
+# 编译输出
+**/build/
+**/dist/
+**/out/
+**/target/
+
+# ==========================================
+# 临时文件
+# ==========================================
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+*.orig
+
+# ==========================================
+# 测试和覆盖率
+# ==========================================
+**/test-results/
+**/coverage/
+**/.coverage
+**/htmlcov/
+**/.tox/
+
+# ==========================================
+# Docker
+# ==========================================
+**/.docker/
+**/docker-compose.override.yml
+
+# ==========================================
+# 文档生成
+# ==========================================
+**/site/
+**/docs/_build/
+
+# ==========================================
+# 大型媒体文件（可选）
+# ==========================================
+# *.mp4
+# *.avi
+# *.mov
+# *.mkv
+# *.mp3
+# *.wav
+
+# ==========================================
+# IDE 特定配置
+# ==========================================
+# IntelliJ IDEA
+**/.iml
+**/.ipr
+**/.iws
+
+# Visual Studio
+**/.vs/
+**/*.user
+**/*.suo
+
+# Eclipse
+**/.project
+**/.classpath
+**/.settings/

@@ -1,0 +1,216 @@
+<div class="tasks-container">
+  <div class="tasks-header">
+    <h1>导入任务</h1>
+    
+    <div class="filters">
+      <mat-form-field appearance="outline" class="filter-field">
+        <mat-label>状态筛选</mat-label>
+        <mat-select [(value)]="statusFilter" (selectionChange)="filterByStatus($any($event).value)">
+          <mat-option value="all">全部状态</mat-option>
+          <mat-option value="pending">等待中</mat-option>
+          <mat-option value="running">运行中</mat-option>
+          <mat-option value="completed">已完成</mat-option>
+          <mat-option value="failed">失败</mat-option>
+          <mat-option value="cancelled">已取消</mat-option>
+        </mat-select>
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" class="filter-field">
+        <mat-label>类型筛选</mat-label>
+        <mat-select [(value)]="typeFilter" (selectionChange)="filterByType($any($event).value)">
+          <mat-option value="all">全部类型</mat-option>
+          <mat-option value="web">网页</mat-option>
+          <mat-option value="local_file">本地文件</mat-option>
+          <mat-option value="video">视频</mat-option>
+        </mat-select>
+      </mat-form-field>
+
+      <button mat-button (click)="loadTasks()">
+        <mat-icon>refresh</mat-icon>
+        刷新
+      </button>
+    </div>
+  </div>
+
+  <div *ngIf="isLoading" class="loading-container">
+    <mat-progress-spinner mode="indeterminate"></mat-progress-spinner>
+    <p>正在加载任务列表...</p>
+  </div>
+
+  <div *ngIf="!isLoading && filteredTasks.length === 0" class="empty-state">
+    <mat-icon>assignment</mat-icon>
+    <h3>暂无任务</h3>
+    <p>在"知识库导入"页面创建导入任务</p>
+  </div>
+
+  <div *ngIf="!isLoading && filteredTasks.length > 0" class="tasks-table-container">
+    <div class="table-wrapper">
+      <table mat-table [dataSource]="filteredTasks" class="tasks-table">
+        
+        <!-- Expand Toggle Column -->
+        <ng-container matColumnDef="expand">
+          <th mat-header-cell *matHeaderCellDef style="width: 50px;"></th>
+          <td mat-cell *matCellDef="let task">
+            <button mat-icon-button (click)="toggleExpand(task); $event.stopPropagation()">
+              <mat-icon>{{ expandedTaskId === task.id ? 'expand_less' : 'expand_more' }}</mat-icon>
+            </button>
+          </td>
+        </ng-container>
+        
+        <!-- Task Name Column -->
+        <ng-container matColumnDef="task_name">
+          <th mat-header-cell *matHeaderCellDef>任务名称</th>
+          <td mat-cell *matCellDef="let task">
+            <div class="task-name-cell">
+              <div class="task-name-info">
+                <div class="task-name">{{ task.task_name }}</div>
+                <div class="task-meta">
+                  <mat-icon class="type-icon">{{ getTypeIcon(task.task_type) }}</mat-icon>
+                  <span>{{ getTaskTypeName(task.task_type) }}</span>
+                </div>
+              </div>
+            </div>
+          </td>
+        </ng-container>
+
+        <!-- Status Column -->
+        <ng-container matColumnDef="status">
+          <th mat-header-cell *matHeaderCellDef>状态</th>
+          <td mat-cell *matCellDef="let task">
+            <mat-chip [color]="getStatusChipColor(task.status)" class="status-chip">
+              {{ getStatusName(task.status) }}
+            </mat-chip>
+          </td>
+        </ng-container>
+
+        <!-- Progress Column -->
+        <ng-container matColumnDef="progress">
+          <th mat-header-cell *matHeaderCellDef>进度</th>
+          <td mat-cell *matCellDef="let task">
+            <div class="progress-cell" *ngIf="task.total_items > 0">
+              <span class="progress-text">{{ task.processed_items }} / {{ task.total_items }}</span>
+              <mat-progress-bar 
+                mode="determinate" 
+                [value]="task.progress_percentage"
+                [color]="task.status === 'completed' ? 'accent' : 'primary'"
+                class="progress-bar-small">
+              </mat-progress-bar>
+              <span class="progress-percent">{{ task.progress_percentage | number:'1.0-0' }}%</span>
+            </div>
+            <span class="no-progress" *ngIf="task.total_items === 0">-</span>
+          </td>
+        </ng-container>
+
+        <!-- Timing Column -->
+        <ng-container matColumnDef="timing">
+          <th mat-header-cell *matHeaderCellDef>时间信息</th>
+          <td mat-cell *matCellDef="let task">
+            <div class="timing-cell">
+              <div class="timing-row" *ngIf="task.started_at">
+                <mat-icon class="time-icon">play_arrow</mat-icon>
+                <span class="time-text">{{ formatDate(task.started_at) }}</span>
+              </div>
+              <div class="timing-row" *ngIf="task.completed_at">
+                <mat-icon class="time-icon">check</mat-icon>
+                <span class="time-text">{{ formatDate(task.completed_at) }}</span>
+              </div>
+              <div class="timing-row" *ngIf="task.started_at && task.completed_at">
+                <mat-icon class="time-icon">schedule</mat-icon>
+                <span class="time-text">{{ getDuration(task.started_at, task.completed_at) }}</span>
+              </div>
+              <span class="no-progress" *ngIf="!task.started_at && !task.completed_at">等待中</span>
+            </div>
+          </td>
+        </ng-container>
+
+        <!-- Actions Column -->
+        <ng-container matColumnDef="actions">
+          <th mat-header-cell *matHeaderCellDef>操作</th>
+          <td mat-cell *matCellDef="let task">
+            <div class="action-buttons">
+              <button 
+                mat-icon-button 
+                color="warn" 
+                (click)="cancelTask(task); $event.stopPropagation()"
+                *ngIf="task.status === 'running'"
+                matTooltip="取消任务">
+                <mat-icon>stop</mat-icon>
+              </button>
+              <button 
+                mat-icon-button 
+                color="warn" 
+                (click)="deleteTask(task); $event.stopPropagation()"
+                *ngIf="task.status !== 'running'"
+                matTooltip="删除任务">
+                <mat-icon>delete</mat-icon>
+              </button>
+            </div>
+          </td>
+        </ng-container>
+
+        <!-- Header Row -->
+        <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+        
+        <!-- Single Row Definition with embedded detail -->
+        <tr mat-row *matRowDef="let task; columns: displayedColumns;" 
+            class="task-row"
+            [class.expanded-row]="expandedTaskId === task.id"
+            (click)="toggleExpand(task)">
+        </tr>
+      </table>
+
+      <!-- Expanded details rendered outside the table but associated with each task -->
+      <div class="expanded-details-container">
+        <div class="expanded-detail" *ngFor="let task of filteredTasks" 
+             [style.display]="expandedTaskId === task.id ? 'block' : 'none'">
+          <div class="detail-section">
+            <h4>详细信息</h4>
+            <div class="detail-grid">
+              <div class="detail-item">
+                <span class="detail-label">任务 ID:</span>
+                <span class="detail-value">{{ task.id }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">任务类型:</span>
+                <span class="detail-value">{{ getTaskTypeName(task.task_type) }}</span>
+              </div>
+              <div class="detail-item" *ngIf="task.started_at">
+                <span class="detail-label">开始时间:</span>
+                <span class="detail-value">{{ formatDate(task.started_at) }}</span>
+              </div>
+              <div class="detail-item" *ngIf="task.completed_at">
+                <span class="detail-label">完成时间:</span>
+                <span class="detail-value">{{ formatDate(task.completed_at) }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">成功:</span>
+                <span class="detail-value success">{{ task.processed_items }}</span>
+              </div>
+              <div class="detail-item" *ngIf="task.failed_items > 0">
+                <span class="detail-label">失败:</span>
+                <span class="detail-value error">{{ task.failed_items }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="detail-section" *ngIf="task.error_message">
+            <h4 class="error-title">
+              <mat-icon color="warn">error_outline</mat-icon>
+              错误信息
+            </h4>
+            <div class="error-content">
+              <pre>{{ task.error_message }}</pre>
+            </div>
+          </div>
+
+          <div class="detail-section" *ngIf="task.result_summary">
+            <h4>执行结果</h4>
+            <div class="result-content">
+              <pre>{{ task.result_summary | json }}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

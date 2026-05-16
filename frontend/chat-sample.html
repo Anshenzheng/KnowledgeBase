@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Agent Chat Terminal</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            /* 延续全局无界冷灰调 */
+            --bg-global: #f6f8fa;
+            --bg-panel: #ffffff;
+            --bg-sidebar-second: #f8fafc;
+            
+            /* 科技蓝品牌色 */
+            --brand-color: #0061ff;
+            --brand-hover: #2575fc;
+            --brand-light: #e6f0ff;
+            
+            /* 文字颜色分级 */
+            --text-heading: #0f172a;
+            --text-body: #334155;
+            --text-caption: #64748b;
+            
+            /* 边框及圆角 */
+            --border-light: #e2e8f0;
+            --radius-main: 12px;
+            --shadow-panel: 0 20px 40px -15px rgba(15, 23, 42, 0.05);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-global);
+            color: var(--text-body);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* --- 1. 最外层主框架布局 --- */
+        .app-container {
+            display: flex;
+            width: 100%;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 系统一级窄导航 (承接上个页面的基调) */
+        .system-sidebar {
+            width: 80px;
+            flex-shrink: 0;
+            background: #ffffff;
+            border-right: 1px solid var(--border-light);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 24px 0;
+            justify-content: space-between;
+        }
+
+        .logo-box { font-size: 24px; color: var(--brand-color); }
+        .menu-group { display: flex; flex-direction: column; gap: 20px; list-style: none; }
+        .menu-link {
+            width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;
+            color: var(--text-caption); text-decoration: none; border-radius: 12px; font-size: 18px; transition: all 0.25s;
+        }
+        .menu-link:hover { background-color: #f1f5f9; color: var(--text-title); }
+        .menu-link.active { background-color: var(--brand-color); color: #ffffff; box-shadow: 0 8px 16px rgba(0, 97, 255, 0.25); }
+
+
+        /* --- 2. 核心：双栏 Chat 布局布局 --- */
+        .chat-layout {
+            flex: 1;
+            display: flex;
+            min-width: 0; /* 防止子组件撑破外部 Flex 容器 */
+            background: var(--bg-panel);
+        }
+
+        /* 左侧会话历史面板 */
+        .sessions-sidebar {
+            width: 280px;
+            flex-shrink: 0; /* 坚决不缩减 */
+            background-color: var(--bg-sidebar-second);
+            border-right: 1px solid var(--border-light);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            padding: 24px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .sidebar-header h3 {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-heading);
+        }
+
+        /* 新建对话按钮 - 大气扁平化 */
+        .btn-create-session {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            border: 1px solid var(--border-light);
+            background: #ffffff;
+            color: var(--text-body);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .btn-create-session:hover {
+            border-color: var(--brand-color);
+            color: var(--brand-color);
+            box-shadow: 0 4px 10px rgba(0, 97, 255, 0.1);
+        }
+
+        .sessions-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 12px 12px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        /* 历史单条记录 - 大气悬浮 */
+        .session-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 14px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: transparent;
+        }
+
+        .session-item:hover {
+            background-color: #f1f5f9;
+        }
+
+        .session-item.active {
+            background-color: #ffffff;
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.03);
+        }
+
+        .session-item i {
+            color: var(--text-caption);
+            font-size: 15px;
+            margin-top: 3px;
+        }
+
+        .session-item.active i {
+            color: var(--brand-color);
+        }
+
+        .session-info {
+            flex: 1;
+            min-width: 0; /* 允许内部文本在挤压时截断 */
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .session-title {
+            font-size: 13.5px;
+            font-weight: 500;
+            color: var(--text-heading);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .session-date {
+            font-size: 11px;
+            color: var(--text-caption);
+        }
+
+
+        /* --- 3. 右侧主聊天区域 --- */
+        .chat-main {
+            flex: 1;
+            min-width: 0; /* 核心：抵抗文本过长导致的容器溢出 */
+            display: flex;
+            flex-direction: column;
+            background-color: #ffffff;
+            position: relative;
+        }
+
+        /* 顶部模型/知识库配置长条 */
+        .chat-settings {
+            padding: 16px 40px;
+            border-bottom: 1px solid var(--border-light);
+            background: #ffffff;
+            z-index: 10;
+        }
+
+        .settings-bar {
+            display: flex;
+            align-items: center;
+            gap: 28px;
+            flex-wrap: wrap;
+        }
+
+        .setting-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .setting-item label {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-caption);
+            white-space: nowrap;
+        }
+
+        /* 扁平化选择器样式 */
+        .setting-select {
+            height: 36px;
+            padding: 0 32px 0 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border-light);
+            background-color: #ffffff;
+            color: var(--text-body);
+            font-size: 13px;
+            outline: none;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            background-size: 14px;
+        }
+
+        /* 扁平复选框样式 */
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            color: var(--text-body);
+        }
+
+
+        /* --- 4. 消息对话流区域 --- */
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 40px clamp(20px, 8vw, 120px); /* 巨大的两侧留白创造出顶奢的排版呼吸感 */
+            display: flex;
+            flex-direction: column;
+            gap: 36px;
+        }
+
+        /* 初始欢迎状态 */
+        .welcome-message {
+            margin: auto;
+            max-width: 460px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+            padding: 40px 0;
+        }
+
+        .welcome-message i {
+            font-size: 40px;
+            color: var(--brand-color);
+        }
+
+        .welcome-message h2 {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-heading);
+            letter-spacing: -0.5px;
+        }
+
+        .welcome-message p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        /* 单条非对称消息流 */
+        .message {
+            display: flex;
+            gap: 20px;
+            max-width: 850px;
+            width: 100%;
+            align-self: flex-start;
+        }
+
+        /* 用户消息靠右，风格极简 */
+        .message.user-message {
+            flex-direction: row-reverse;
+            align-self: flex-end;
+        }
+
+        .message-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            font-size: 14px;
+        }
+
+        .user-message .message-avatar {
+            background-color: #f1f5f9;
+            color: var(--text-heading);
+        }
+
+        .assistant-message .message-avatar {
+            background-color: var(--brand-light);
+            color: var(--brand-color);
+        }
+
+        .message-content {
+            flex: 1;
+            min-width: 0; /* 极端重要：防止里面的超长文本无换行撑破外层布局 */
+        }
+
+        .message-header {
+            margin-bottom: 6px;
+        }
+
+        .message-role {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-caption);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .user-message .message-header { text-align: right; }
+
+        /* 对话气泡内容 - 拒绝厚重底色，向无界空气感靠拢 */
+        .message-text {
+            font-size: 14.5px;
+            line-height: 1.65;
+            color: var(--text-body);
+            word-break: break-word; /* 自动在长字符、路径处断行 */
+        }
+
+        .user-message .message-text {
+            background-color: #f8fafc;
+            padding: 12px 18px;
+            border-radius: 12px;
+            display: inline-block;
+            float: right; /* 让用户短文本向右贴合 */
+        }
+
+
+        /* --- 5. 模块化：高质感引用组件 --- */
+        .citations {
+            margin-top: 20px;
+            border-top: 1px dashed var(--border-light);
+            padding-top: 16px;
+            clear: both;
+        }
+
+        .citations-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-caption);
+            margin-bottom: 10px;
+        }
+
+        .citation-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 12px;
+        }
+
+        .citation-item {
+            background-color: #f8fafc;
+            border: 1px solid var(--border-light);
+            border-radius: 8px;
+            padding: 12px;
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+            transition: all 0.2s;
+        }
+
+        .citation-item:hover {
+            border-color: #cbd5e1;
+            background-color: #f1f5f9;
+        }
+
+        .citation-number {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--brand-color);
+            background: var(--brand-light);
+            padding: 1px 5px;
+            border-radius: 4px;
+            line-height: 1;
+        }
+
+        .citation-details {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .citation-details strong {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-title);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 4px;
+        }
+
+        .citation-meta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 11px;
+            color: var(--text-caption);
+        }
+
+        .citation-type { display: inline-flex; align-items: center; gap: 4px; }
+        .citation-type i { font-size: 11px; }
+
+        .citation-url {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex: 1;
+        }
+
+
+        /* --- 6. 底部输入域（悬浮、不落地结构） --- */
+        .chat-input-area {
+            padding: 0 40px 32px 40px;
+            background: linear-gradient(180deg, rgba(255,255,255,0) 0%, #ffffff 50%); /* 渐变掩盖图层 */
+        }
+
+        .input-wrapper {
+            max-width: 850px;
+            margin: 0 auto;
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: var(--radius-main);
+            box-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.08);
+            display: flex;
+            align-items: flex-end;
+            padding: 12px 16px;
+            gap: 12px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .input-wrapper:focus-within {
+            border-color: var(--brand-color);
+            box-shadow: 0 10px 30px -10px rgba(0, 97, 255, 0.15);
+        }
+
+        .chat-input {
+            flex: 1;
+        }
+
+        /* 移除原生输入框边框，使其融入一体 */
+        .chat-input textarea {
+            width: 100%;
+            border: none;
+            outline: none;
+            resize: none;
+            font-size: 14.5px;
+            color: var(--text-body);
+            line-height: 1.5;
+            min-height: 24px;
+            max-height: 160px;
+            background: transparent;
+        }
+
+        /* 发送按钮 - 圆形科技质感 */
+        .send-button {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background-color: var(--brand-color);
+            color: #ffffff;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s, opacity 0.2s;
+            flex-shrink: 0;
+            margin-bottom: 2px;
+        }
+
+        .send-button:hover { background-color: var(--brand-hover); }
+        .send-button:disabled { background-color: #e2e8f0; color: #94a3b8; cursor: not-allowed; }
+
+        /* 加载动态器 */
+        .loading-box {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            color: var(--text-caption);
+        }
+        .loading-box i {
+            animation: spin 1s linear infinite;
+            color: var(--brand-color);
+        }
+
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <aside class="system-sidebar">
+            <div class="logo-box"><i class="fa-solid fa-terminal"></i></div>
+            <ul class="menu-group">
+                <li><a href="#" class="menu-link active" title="智能对话"><i class="fa-regular fa-comment-dots"></i></a></li>
+                <li><a href="#" class="menu-link" title="知识库导入"><i class="fa-solid fa-folder-plus"></i></a></li>
+                <li><a href="#" class="menu-link" title="导入任务"><i class="fa-regular fa-list-alt"></i></a></li>
+                <li><a href="#" class="menu-link" title="模型配置"><i class="fa-solid fa-sliders"></i></a></li>
+            </ul>
+            <div style="color: var(--text-caption); font-size: 20px;"><i class="fa-regular fa-user-circle"></i></div>
+        </aside>
+
+        <div class="chat-layout">
+            
+            <div class="sessions-sidebar">
+                <div class="sidebar-header">
+                    <h3>对话历史</h3>
+                    <button class="btn-create-session" title="新建对话" (click)="createNewSession()">
+                        <i class="fa-solid fa-plus"></i>
+                    </button>
+                </div>
+                
+                <div class="sessions-list">
+                    <div *ngFor="let session of sessions" 
+                         class="session-item"
+                         [class.active]="currentSession?.session_id === session.session_id"
+                         (click)="selectSession(session)">
+                        <i class="fa-regular fa-message"></i>
+                        <div class="session-info">
+                            <span class="session-title">{{ session.title || '新对话' }}</span>
+                            <span class="session-date">{{ session.updated_at | date:'MM/dd HH:mm' }}</span>
+                        </div>
+                    </div>
+
+                    <div class="session-item active">
+                        <i class="fa-regular fa-message"></i>
+                        <div class="session-info">
+                            <span class="session-title">解析并分析 Agent 系统白皮书架构方案</span>
+                            <span class="session-date">05/16 12:30</span>
+                        </div>
+                    </div>
+                    <div class="session-item">
+                        <i class="fa-regular fa-message"></i>
+                        <div class="session-info">
+                            <span class="session-title">本地 pgvector 向量索引如何自动更新同步？</span>
+                            <span class="session-date">05/15 18:14</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-main">
+                
+                <div class="chat-settings">
+                    <div class="settings-bar">
+                        <div class="setting-item">
+                            <label>选择模型</label>
+                            <select class="setting-select">
+                                <option *ngFor="let model of models" [value]="model.id">GLM-4-Flash</option>
+                                <option>DeepSeek-Chat</option>
+                            </select>
+                        </div>
+
+                        <div class="setting-item">
+                            <label class="checkbox-container">
+                                <input type="checkbox" style="cursor:pointer;" [checked]="useKnowledge" (change)="useKnowledge = $event.checked" checked>
+                                <span>使用知识库</span>
+                            </label>
+                        </div>
+
+                        <div class="setting-item" *ngIf="useKnowledge">
+                            <label>检索数量</label>
+                            <select class="setting-select">
+                                <option [value]="3">3 条</option>
+                                <option [value]="5" selected>5 条</option>
+                                <option [value]="10">10 条</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="messages-container" #messagesContainer>
+                    
+                    <div *ngIf="messages.length === 0" class="welcome-message">
+                        <i class="fa-solid fa-brain"></i>
+                        <h2>欢迎使用智能知识仓库</h2>
+                        <p>我可以回答您的问题，并基于本地及 Web 嵌入知识库提供高置信度的精准数据回答与多维来源交叉引用。</p>
+                    </div>
+
+                    <div class="message user-message">
+                        <div class="message-avatar"><i class="fa-regular fa-user"></i></div>
+                        <div class="message-content">
+                            <div class="message-header"><span class="message-role">您</span></div>
+                            <div class="message-text">请帮我检查这一串长网址的解析进度，并确认对应的向量化管道是否正常。网址是：https://ex.chinadaily.com.cn/exchange/partners/82/rss/channel/cn/columns/sz8srm/stories/WS6944e578a310942cc49977a9.html</div>
+                        </div>
+                    </div>
+
+                    <div class="message assistant-message">
+                        <div class="message-avatar"><i class="fa-solid fa-robot"></i></div>
+                        <div class="message-content">
+                            <div class="message-header"><span class="message-role">AI 助手</span></div>
+                            <div class="message-text">
+                                已为你查询完毕。该任务源正在进行第二阶段的 HTML 清洗与分块（Chunking）。管道运行状态良好，由于数据中包含了大量的嵌套链接，当前递归解析正在按照系统设定平稳推进。
+                            </div>
+                            
+                            <div class="citations">
+                                <div class="citations-title"><i class="fa-solid fa-quote-left"></i> 检索交叉引用来源 (2) :</div>
+                                <div class="citation-list">
+                                    <div class="citation-item">
+                                        <span class="citation-number">1</span>
+                                        <div class="citation-details">
+                                            <strong>系统清洗日志及实时切片数据监控中心看板</strong>
+                                            <div class="citation-meta">
+                                                <span class="citation-type"><i class="fa-solid fa-globe"></i> 网页</span>
+                                                <span class="citation-url">https://ex.chinadaily.com.cn/...</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="citation-item">
+                                        <span class="citation-number">2</span>
+                                        <div class="citation-details">
+                                            <strong>test_pgvector.txt_chunk_4.bin</strong>
+                                            <div class="citation-meta">
+                                                <span class="citation-type"><i class="fa-regular fa-file-lines"></i> 文件</span>
+                                                <span class="citation-url">Local File System</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div *ngIf="isLoading" class="message assistant-message">
+                        <div class="message-avatar"><i class="fa-solid fa-robot"></i></div>
+                        <div class="message-content">
+                            <div class="loading-box">
+                                <i class="fa-solid fa-circle-notch"></i>
+                                <span>正在检索知识库并思考中...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="chat-input-area">
+                    <div class="input-wrapper">
+                        <div class="chat-input">
+                            <textarea 
+                                [(ngModel)]="newMessage"
+                                placeholder="输入您的问题，回车发送，Shift + 回车换行..."
+                                (keydown)="onKeydown($event)"
+                                rows="1"
+                                #messageInput></textarea>
+                        </div>
+                        
+                        <button class="send-button" title="发送消息" (click)="sendMessage()">
+                            <i class="fa-solid fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

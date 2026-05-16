@@ -1,0 +1,237 @@
+<section class="import-page">
+  <header class="page-header-info">
+    <h1>知识库导入</h1>
+  </header>
+
+  <nav aria-label="导入方式">
+    <ul class="tab-nav" role="tablist">
+      <li class="tab-item" [class.active]="activeTab === 'web'" (click)="setActiveTab('web')" tabindex="0" role="tab" [attr.aria-selected]="activeTab === 'web'">网页导入</li>
+      <li class="tab-item" [class.active]="activeTab === 'upload'" (click)="setActiveTab('upload')" tabindex="0" role="tab" [attr.aria-selected]="activeTab === 'upload'">本地文本导入</li>
+      <li class="tab-item" [class.active]="activeTab === 'video'" (click)="setActiveTab('video')" tabindex="0" role="tab" [attr.aria-selected]="activeTab === 'video'">视频导入</li>
+    </ul>
+  </nav>
+
+  <section *ngIf="activeTab === 'web'" class="content-layout">
+    <section class="card-panel">
+      <header class="import-header">
+        <i class="fa-solid fa-globe" aria-hidden="true"></i>
+        <h2>网页知识库导入</h2>
+      </header>
+      <p class="import-desc">输入网址自动爬取网页内容并导入知识库</p>
+      <form class="form-section" (ngSubmit)="importWeb()">
+        <label class="input-group">
+          <span>起始网址</span>
+          <input type="url" class="input-standard" [(ngModel)]="webUrl" name="webUrl" placeholder="https://example.com">
+        </label>
+        <label class="input-group">
+          <span>任务名称（可选）</span>
+          <input type="text" class="input-standard" [(ngModel)]="webTaskName" name="webTaskName" placeholder="请输入任务名称">
+        </label>
+        <fieldset class="slider-group">
+          <legend class="slider-box">
+            <span class="slider-title">最大递归深度</span>
+          </legend>
+          <div class="slider-container">
+            <input type="range" class="range-slider" min="1" max="5" step="1" [(ngModel)]="webMaxDepth" name="webMaxDepth">
+            <div class="slider-ticks">
+              <span class="tick">1</span>
+              <span class="tick">2</span>
+              <span class="tick">3</span>
+              <span class="tick">4</span>
+              <span class="tick">5</span>
+            </div>
+          </div>
+          <p class="import-desc slider-hint">
+            深度 1: 仅当前页面<br>
+            深度 2-3: 推荐，爬取子页面<br>
+            深度 4-5: 完整站点爬取
+          </p>
+        </fieldset>
+        <label class="input-group">
+          <span>重复内容处理策略</span>
+          <select class="input-standard select-standard" [(ngModel)]="webStrategy" name="webStrategy">
+            <option value="skip">跳过</option>
+            <option value="overwrite">覆盖</option>
+            <option value="add_new">作为新内容添加</option>
+          </select>
+        </label>
+        <footer class="action-footer">
+          <button type="submit" class="btn-primary-large" [disabled]="!webUrl.trim() || isImportingWeb">
+            <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
+            {{ isImportingWeb ? '导入中...' : '开始导入' }}
+          </button>
+        </footer>
+      </form>
+    </section>
+    <aside class="card-panel instruction-card">
+      <header class="info-header">
+        <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+        <h3>使用说明</h3>
+      </header>
+      <ul class="info-list">
+        <li>系统会自动爬取起始网址及其所有子链接</li>
+        <li>递归深度最大为 5 层</li>
+        <li>每个网页内容会被分割成片段并生成向量嵌入</li>
+        <li>自动检测重复内容，避免重复导入</li>
+        <li>可在「导入任务」页面查看进度</li>
+      </ul>
+    </aside>
+  </section>
+
+  <section *ngIf="activeTab === 'upload'" class="content-layout">
+    <section class="card-panel">
+      <header class="import-header">
+        <i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i>
+        <h2>上传 PDF/Word 文档</h2>
+      </header>
+      <p class="import-desc">直接上传 PDF 或 Word 文档到知识库</p>
+      <form class="form-section" (ngSubmit)="uploadFiles()">
+        <label class="input-group">
+          <span>任务名称（可选）</span>
+          <input type="text" class="input-standard" [(ngModel)]="uploadTaskName" name="uploadTaskName" placeholder="请输入任务名称">
+        </label>
+        <label class="input-group">
+          <span>重复内容处理策略</span>
+          <select class="input-standard select-standard" [(ngModel)]="uploadStrategy" name="uploadStrategy">
+            <option value="skip">跳过</option>
+            <option value="overwrite">覆盖</option>
+            <option value="add_new">作为新内容添加</option>
+          </select>
+        </label>
+        <section class="upload-zone">
+          <input type="file" multiple accept=".pdf,.docx,.txt,.md,.rst" (change)="onFilesSelected($event)" id="fileInput" hidden>
+          <button type="button" class="btn-secondary-large" (click)="triggerFileInput()" [disabled]="isUploading">
+            <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
+            选择文件
+          </button>
+          <p class="upload-hint">支持 .pdf、.docx、.txt、.md、.rst</p>
+        </section>
+        <section *ngIf="selectedFiles.length > 0" class="file-list">
+          <p class="file-list-title">已选择 {{ selectedFiles.length }} 个文件</p>
+          <article *ngFor="let file of selectedFiles; let i = index" class="file-item">
+            <i class="fa-regular fa-file-lines" aria-hidden="true"></i>
+            <span class="file-name">{{ file.name }}</span>
+            <span class="file-size">{{ (file.size / 1024).toFixed(1) }} KB</span>
+            <button type="button" class="btn-icon-remove" (click)="removeFile(i)" [disabled]="isUploading" aria-label="移除文件">
+              <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+            </button>
+          </article>
+        </section>
+        <footer class="action-footer">
+          <button type="submit" class="btn-primary-large" [disabled]="selectedFiles.length === 0 || isUploading">
+            <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
+            {{ isUploading ? '上传中...' : '开始上传' }}
+          </button>
+        </footer>
+      </form>
+    </section>
+    <aside class="card-panel instruction-card">
+      <header class="info-header">
+        <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+        <h3>使用说明</h3>
+      </header>
+      <ul class="info-list">
+        <li>支持批量上传多个文件</li>
+        <li>PDF 文件会自动提取文本内容</li>
+        <li>Word 文档会保留段落结构</li>
+        <li>系统会自动检测重复内容</li>
+        <li>可在「导入任务」页面查看进度</li>
+      </ul>
+    </aside>
+  </section>
+
+  <section *ngIf="activeTab === 'video'" class="content-layout">
+    <section class="card-panel">
+      <header class="import-header">
+        <i class="fa-solid fa-video" aria-hidden="true"></i>
+        <h2>视频知识库导入</h2>
+      </header>
+      <p class="import-desc">下载视频并提取语音转换为文本导入知识库</p>
+      <form class="form-section" (ngSubmit)="importVideo()">
+        <label class="input-group">
+          <span>视频来源</span>
+          <div class="video-source-selector">
+            <label class="radio-option">
+              <input type="radio" name="videoSourceType" value="url" [(ngModel)]="videoSourceType" (change)="onVideoSourceTypeChange()">
+              <span class="radio-label">
+                <i class="fa-solid fa-link" aria-hidden="true"></i>
+                网络视频
+              </span>
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="videoSourceType" value="local" [(ngModel)]="videoSourceType" (change)="onVideoSourceTypeChange()">
+              <span class="radio-label">
+                <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
+                本地视频
+              </span>
+            </label>
+          </div>
+        </label>
+
+        <!-- 网络视频输入 -->
+        <div *ngIf="videoSourceType === 'url'" class="video-input-section">
+          <label class="input-group">
+            <span>视频 URL</span>
+            <input type="url" class="input-standard" [(ngModel)]="videoUrl" name="videoUrl" placeholder="https://www.youtube.com/watch?v=...">
+          </label>
+        </div>
+
+        <!-- 本地视频文件上传 -->
+        <div *ngIf="videoSourceType === 'local'" class="video-input-section">
+          <label class="input-group">
+            <span>本地视频文件</span>
+            <div class="upload-zone">
+              <input type="file" accept="video/*" (change)="onVideoFileSelected($event)" id="videoFileInput" hidden>
+              <button type="button" class="btn-secondary-large" (click)="triggerVideoFileInput()" [disabled]="isImportingVideo">
+                <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
+                选择视频文件
+              </button>
+              <p class="upload-hint">支持常见视频格式（mp4, avi, mov, mkv 等）</p>
+            </div>
+            <div *ngIf="selectedVideoFile" class="file-item-selected">
+              <i class="fa-solid fa-video" aria-hidden="true"></i>
+              <span class="file-name">{{ selectedVideoFile.name }}</span>
+              <span class="file-size">{{ (selectedVideoFile.size / 1024 / 1024).toFixed(2) }} MB</span>
+              <button type="button" class="btn-icon-remove" (click)="removeVideoFile()" [disabled]="isImportingVideo" aria-label="移除文件">
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+          </label>
+        </div>
+
+        <label class="input-group">
+          <span>任务名称（可选）</span>
+          <input type="text" class="input-standard" [(ngModel)]="videoTaskName" name="videoTaskName" placeholder="请输入任务名称">
+        </label>
+        <label class="input-group">
+          <span>重复内容处理策略</span>
+          <select class="input-standard select-standard" [(ngModel)]="videoStrategy" name="videoStrategy">
+            <option value="skip">跳过</option>
+            <option value="overwrite">覆盖</option>
+            <option value="add_new">作为新内容添加</option>
+          </select>
+        </label>
+        <footer class="action-footer">
+          <button type="submit" class="btn-primary-large" [disabled]="!isVideoFormValid() || isImportingVideo">
+            <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
+            {{ isImportingVideo ? '导入中...' : '开始导入' }}
+          </button>
+        </footer>
+      </form>
+    </section>
+    <aside class="card-panel instruction-card">
+      <header class="info-header">
+        <i class="fa-solid fa-list-ol" aria-hidden="true"></i>
+        <h3>视频处理流程</h3>
+      </header>
+      <ul class="info-list">
+        <li>从 URL 下载视频或使用本地视频文件</li>
+        <li>提取视频中的音频轨道</li>
+        <li>使用 Whisper AI 进行语音识别</li>
+        <li>将识别的文本按时间戳分割</li>
+        <li>生成向量嵌入并导入知识库</li>
+        <li>支持按时间戳定位视频片段</li>
+      </ul>
+    </aside>
+  </section>
+</section>

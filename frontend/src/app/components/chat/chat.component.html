@@ -1,0 +1,165 @@
+<div class="chat-layout">
+  <!-- 左侧会话历史面板 -->
+  <div class="sessions-sidebar">
+    <div class="sidebar-header">
+      <h3>对话历史</h3>
+      <div class="header-actions">
+        <button class="btn-create-session" title="新建对话" (click)="createNewSession()">
+          <i class="fa-solid fa-plus"></i>
+        </button>
+        <button class="btn-clear-all" *ngIf="sessions.length > 0" title="清空全部对话" (click)="deleteAllSessions()">
+          <i class="fa-solid fa-trash-can"></i>
+        </button>
+      </div>
+    </div>
+    
+    <div class="sessions-list">
+      <div 
+        *ngFor="let session of sessions; let i = index" 
+        class="session-item"
+        [class.active]="currentSession?.session_id === session.session_id"
+        (click)="selectSession(session)">
+        <div class="session-index">{{ i + 1 }}</div>
+        <i class="fa-regular fa-message"></i>
+        <div class="session-info">
+          <span class="session-title">{{ session.title || '新对话' }}</span>
+          <span class="session-date">{{ session.updated_at | date:'MM/dd HH:mm' }}</span>
+        </div>
+        <button class="btn-delete-session" title="删除对话" (click)="deleteSession(session); $event.stopPropagation()">
+          <i class="fa-solid fa-trash-can"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右侧主聊天区域 -->
+  <div class="chat-main">
+    <!-- 顶部模型/知识库配置栏 -->
+    <div class="chat-settings">
+      <div class="settings-bar">
+        <div class="setting-item">
+          <label>选择模型</label>
+          <select class="setting-select" [(ngModel)]="selectedModelId">
+            <option *ngFor="let model of models" [value]="model.id">
+              {{ model.display_name }}
+            </option>
+          </select>
+        </div>
+
+        <div class="setting-item">
+          <label class="checkbox-container">
+            <input type="checkbox" style="cursor:pointer;" 
+                   [checked]="useKnowledge" 
+                   (change)="onUseKnowledgeChange($event)">
+            <span>使用知识库</span>
+          </label>
+        </div>
+
+        <div class="setting-item" *ngIf="useKnowledge">
+          <label>检索数量</label>
+          <select class="setting-select" [(ngModel)]="topK">
+            <option [value]="3">3 条</option>
+            <option [value]="5">5 条</option>
+            <option [value]="10">10 条</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- 消息对话流区域 -->
+    <div class="messages-container" #messagesContainer>
+      <!-- 初始欢迎状态 -->
+      <div *ngIf="messages.length === 0" class="welcome-message">
+        <i class="fa-solid fa-robot"></i>
+        <h2>欢迎使用智能知识仓库</h2>
+        <p>我可以回答您的问题，并利用知识库提供准确的信息和引用来源。</p>
+      </div>
+
+      <!-- 消息列表 -->
+      <div 
+        *ngFor="let message of messages; trackBy: trackByMessageId" 
+        class="message"
+        [class.user-message]="message.role === 'user'"
+        [class.assistant-message]="message.role === 'assistant'">
+        
+        <div class="message-avatar">
+          <i class="fa-solid" [class.fa-user]="message.role === 'user'" [class.fa-robot]="message.role === 'assistant'"></i>
+        </div>
+
+        <div class="message-content">
+          <div class="message-header">
+            <div class="message-header-content">
+              <span class="message-role">{{ message.role === 'user' ? '您' : 'AI 助手' }}</span>
+              <button class="btn-copy-message" title="复制内容" (click)="copyMessage(message.content)">
+                <i class="fa-regular fa-copy"></i>
+              </button>
+            </div>
+          </div>
+          <div class="message-text" [innerHTML]="message.content | markdown | async"></div>
+          
+          <!-- 引用来源 -->
+          <div class="citations" *ngIf="message.citations && message.citations.length > 0">
+            <div class="citations-title">引用来源</div>
+            <div class="citation-list">
+              <div *ngFor="let citation of message.citations; let i = index" class="citation-item">
+                <span class="citation-number">{{ i + 1 }}</span>
+                <div class="citation-details">
+                  <strong>{{ citation.title }}</strong>
+                  <div class="citation-meta">
+                    <span class="citation-type" *ngIf="citation.source_type === 'web'">
+                      <i class="fa-solid fa-globe"></i> 网页
+                    </span>
+                    <span class="citation-type" *ngIf="citation.source_type === 'local_file'">
+                      <i class="fa-solid fa-file"></i> 文件
+                    </span>
+                    <span class="citation-type" *ngIf="citation.source_type === 'video'">
+                      <i class="fa-solid fa-video"></i> 视频
+                    </span>
+                    <span class="citation-url" *ngIf="citation.url">{{ citation.url }}</span>
+                    <span class="citation-time" *ngIf="citation.timestamp_formatted">
+                      {{ citation.timestamp_formatted }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 加载指示器 -->
+      <div *ngIf="isLoading" class="message assistant-message">
+        <div class="message-avatar">
+          <i class="fa-solid fa-robot"></i>
+        </div>
+        <div class="message-content">
+          <div class="loading-box">
+            <i class="fa-solid fa-circle-notch fa-spin"></i>
+            <span>正在思考中...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 底部输入域 -->
+    <div class="chat-input-area">
+      <div class="input-wrapper">
+        <div class="chat-input">
+          <textarea 
+            [(ngModel)]="newMessage"
+            placeholder="输入您的问题..."
+            (keydown)="onKeydown($event)"
+            rows="1">
+          </textarea>
+        </div>
+        
+        <button 
+          class="send-button"
+          (click)="sendMessage()" 
+          [disabled]="!newMessage.trim() || isLoading">
+          <i class="fa-solid fa-paper-plane"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

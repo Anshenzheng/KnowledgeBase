@@ -1,0 +1,198 @@
+<div class="main-header">
+  <h1 class="page-title">模型配置</h1>
+  <button class="btn-action-primary" (click)="openAddDialog()">
+    <i class="fa-solid fa-plus"></i>
+    添加模型
+  </button>
+</div>
+
+<div class="content-body">
+  <!-- Tab 导航 -->
+  <nav class="tab-nav" aria-label="模型类型">
+    <ul class="tab-list" role="tablist">
+      <li 
+        class="tab-item" 
+        [class.active]="activeTab === 'chat'"
+        (click)="activeTab = 'chat'; loadModels()"
+        tabindex="0"
+        role="tab"
+        [attr.aria-selected]="activeTab === 'chat'">
+        <i class="fa-solid fa-comments"></i>
+        Chat 模型
+      </li>
+      <li 
+        class="tab-item" 
+        [class.active]="activeTab === 'embedding'"
+        (click)="activeTab = 'embedding'; loadEmbeddingModels()"
+        tabindex="0"
+        role="tab"
+        [attr.aria-selected]="activeTab === 'embedding'">
+        <i class="fa-solid fa-vector-square"></i>
+        Embedding 模型
+      </li>
+    </ul>
+  </nav>
+
+  <!-- Chat 模型内容 -->
+  <div *ngIf="activeTab === 'chat'">
+  <div *ngIf="isLoading" class="loading-container">
+    <i class="fa-solid fa-circle-notch fa-spin"></i>
+    <p>正在加载模型列表...</p>
+  </div>
+
+  <div *ngIf="!isLoading && models.length === 0" class="empty-state">
+    <i class="fa-solid fa-microchip"></i>
+    <h3>暂无配置的模型</h3>
+    <p>请添加至少一个 LLM 模型以开始使用</p>
+    
+    <div class="presets-grid">
+      <div 
+        *ngFor="let preset of presets" 
+        class="preset-card"
+        (click)="openAddDialog(preset)">
+        <div class="preset-card-header">
+          <i class="fa-solid fa-robot"></i>
+          <div class="preset-info">
+            <div class="preset-title">{{ preset.display_name }}</div>
+            <div class="preset-subtitle">{{ preset.model_name }}</div>
+          </div>
+        </div>
+        <div class="preset-content">
+          <p>{{ preset.description }}</p>
+        </div>
+        <div class="preset-actions">
+          <button class="btn-action-default">添加此模型</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="!isLoading && models.length > 0" class="models-table-container">
+    <div class="table-responsive">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 25%;">模型名称</th>
+            <th style="width: 20%;">提供商</th>
+            <th style="width: 20%;">模型名称</th>
+            <th style="width: 15%;">状态</th>
+            <th style="width: 20%;">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let model of models; trackBy: trackByModelId">
+            <td>
+              <div class="model-name-cell">
+                <i class="fa-solid fa-microchip"></i>
+                <div class="model-detail">
+                  <div class="model-title">{{ model.display_name }}</div>
+                  <div class="model-subtitle">{{ model.model_name }}</div>
+                </div>
+                <i class="fa-solid fa-star default-icon" *ngIf="model.is_default" title="默认模型"></i>
+              </div>
+            </td>
+            <td>
+              <span class="provider-badge">{{ model.provider }}</span>
+            </td>
+            <td>
+              <div class="cell-info">
+                <div class="info-label">API:</div>
+                <div class="info-value">{{ model.base_url || '默认' }}</div>
+              </div>
+            </td>
+            <td>
+              <span class="badge" [class.active]="model.is_active">
+                {{ model.is_active ? '已启用' : '已禁用' }}
+              </span>
+            </td>
+            <td>
+              <div class="operation-group">
+                <button class="btn-link-action" (click)="setAsDefault(model)" [disabled]="model.is_default" title="设为默认">
+                  <i class="fa-solid fa-star"></i>
+                </button>
+                <button class="btn-link-action" (click)="openEditDialog(model)" title="编辑">
+                  <i class="fa-solid fa-pen"></i>
+                </button>
+                <button class="btn-link-action" (click)="deleteModel(model)" title="删除" style="color: var(--status-red);">
+                  <i class="fa-solid fa-trash-can"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  </div>
+
+  <!-- Embedding 模型内容 -->
+  <div *ngIf="activeTab === 'embedding'">
+    <div *ngIf="isLoadingEmbedding" class="loading-container">
+      <i class="fa-solid fa-circle-notch fa-spin"></i>
+      <p>正在加载 Embedding 模型列表...</p>
+    </div>
+
+    <div *ngIf="!isLoadingEmbedding && embeddingModels.length === 0" class="empty-state">
+      <i class="fa-solid fa-vector-square"></i>
+      <h3>暂无配置的 Embedding 模型</h3>
+      <p>请添加 Embedding 模型以进行知识库向量化</p>
+    </div>
+
+    <div *ngIf="!isLoadingEmbedding && embeddingModels.length > 0" class="models-table-container">
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 25%;">模型名称</th>
+              <th style="width: 20%;">提供商</th>
+              <th style="width: 20%;">模型名称</th>
+              <th style="width: 15%;">状态</th>
+              <th style="width: 20%;">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let model of embeddingModels; trackBy: trackByModelId">
+              <td>
+                <div class="model-name-cell">
+                  <i class="fa-solid fa-vector-square"></i>
+                  <div class="model-detail">
+                    <div class="model-title">{{ model.display_name }}</div>
+                    <div class="model-subtitle">{{ model.model_name }}</div>
+                  </div>
+                  <i class="fa-solid fa-star default-icon" *ngIf="model.is_default" title="默认 Embedding 模型"></i>
+                </div>
+              </td>
+              <td>
+                <span class="provider-badge">{{ model.provider }}</span>
+              </td>
+              <td>
+                <div class="cell-info">
+                  <div class="info-label">API:</div>
+                  <div class="info-value">{{ model.base_url || '默认' }}</div>
+                </div>
+              </td>
+              <td>
+                <span class="badge" [class.active]="model.is_active">
+                  {{ model.is_active ? '已启用' : '已禁用' }}
+                </span>
+              </td>
+              <td>
+                <div class="operation-group">
+                  <button class="btn-link-action" (click)="setAsDefault(model)" [disabled]="model.is_default" title="设为默认">
+                    <i class="fa-solid fa-star"></i>
+                  </button>
+                  <button class="btn-link-action" (click)="openEditDialog(model)" title="编辑">
+                    <i class="fa-solid fa-pen"></i>
+                  </button>
+                  <button class="btn-link-action" (click)="deleteModel(model)" title="删除" style="color: var(--status-red);">
+                    <i class="fa-solid fa-trash-can"></i>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
