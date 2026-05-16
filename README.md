@@ -116,19 +116,65 @@ ffmpeg -version
 
 #### 1. 安装 PostgreSQL 和 pgvector
 
-**Windows:**
-```bash
-# 下载并安装 PostgreSQL 15+: https://www.postgresql.org/download/windows/
-# 安装时记住设置的密码（默认为 postgres）
+**Windows 详细安装步骤:**
 
-# 配置 pgvector（可选，用于向量检索功能）
-# 方法 1: 使用 psql 命令行
-cd "C:\Program Files\PostgreSQL\15\bin"
-.\psql -U postgres -c "CREATE EXTENSION IF NOT EXISTS vector;"
+1. **安装 PostgreSQL 15+**
+   - 下载并安装 PostgreSQL 15+: https://www.postgresql.org/download/windows/
+   - 安装时记住设置的密码（默认为 postgres）
 
-# 方法 2: 如果上述命令失败，需要从源码编译 pgvector
-# 详见：https://github.com/pgvector/pgvector#windows
-```
+2. **下载 pgvector Windows 预编译包**
+   - 官方 pgvector 仓库不提供 Windows 预编译包，使用社区维护的可靠版本
+   - 打开下载地址：`https://github.com/andreiramani/pgvector_pgsql_windows/releases`
+   - 下载与你的 PostgreSQL 版本匹配的包：
+     - PostgreSQL 16：下载 `vector.v0.8.2-pg16.zip`（推荐版本，稳定兼容）
+     - PostgreSQL 15/17：选择对应版本的 zip 包
+   - 将下载的压缩包解压到任意目录（如 `下载\vector.v0.8.2-pg16`）
+
+3. **安装 pgvector 扩展文件**
+   
+   **关键文件说明：**
+   | 文件类型 | 所在目录 | 说明 |
+   |---------|---------|------|
+   | 动态库文件 | `vector.v0.8.2-pg16\lib\vector.dll` | 扩展的核心实现，必须复制到 PostgreSQL 的 lib 目录 |
+   | 扩展脚本文件 | `vector.v0.8.2-pg16\share\extension\` 下的所有文件 | 包含 vector.control、vector--0.8.2.sql 等，定义扩展结构 |
+   
+   **注意：** `include` 目录下的头文件无需复制，仅编译源码时需要。
+   
+   **复制文件到 PostgreSQL 目录：**
+   - 复制 `vector.dll` 到 PostgreSQL 的 lib 目录：
+     ```
+     C:\Program Files\PostgreSQL\16\lib\
+     ```
+   - 复制 `share\extension` 下的所有文件到 PostgreSQL 的扩展目录：
+     ```
+     C:\Program Files\PostgreSQL\16\share\extension\
+     ```
+
+4. **重启 PostgreSQL 服务**
+   
+   文件复制完成后，必须重启 PostgreSQL 服务才能识别新扩展：
+   - 按下 `Win + R`，输入 `services.msc` 回车，打开「服务」窗口
+   - 在列表中找到 `postgresql-x64-16`（你的 PostgreSQL 版本）
+   - 右键点击服务，选择「重启」，等待服务状态变为「正在运行」
+
+5. **在数据库中启用 pgvector 扩展**
+   - 打开 PostgreSQL 的 SQL Shell (psql)（开始菜单中可找到）
+   - 按提示连接到数据库（默认参数直接回车即可，密码为安装 PostgreSQL 时设置的 postgres 用户密码）
+   - 执行以下 SQL 启用扩展：
+     ```sql
+     -- 启用 vector 扩展（IF NOT EXISTS 避免重复创建报错）
+     CREATE EXTENSION IF NOT EXISTS vector;
+     ```
+   - 命令执行后无报错，且返回下一行 `postgres=#` 提示符，说明扩展已成功启用
+
+6. **验证 pgvector 安装是否成功**
+   
+   **验证 1：查看已安装扩展列表**
+   - 在 psql 中执行以下命令，确认 vector 扩展已注册：
+     ```sql
+     \dx
+     ```
+   - **预期结果：** 列表中出现 `vector` 条目，版本为 0.8.2，描述为 `vector data type and ivfflat and hnsw access methods`
 
 **Linux/Mac:**
 ```bash
