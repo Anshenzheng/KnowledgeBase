@@ -156,7 +156,7 @@
         <button 
           class="send-button"
           (click)="sendMessage()" 
-          [disabled]="!newMessage.trim() || isLoading">
+          [disabled]="!newMessage.trim() || isLoading || models.length === 0">
           <i class="fa-solid fa-paper-plane"></i>
         </button>
       </div>

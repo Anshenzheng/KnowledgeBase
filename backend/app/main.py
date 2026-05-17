@@ -9,7 +9,7 @@ import os
 
 from app.config import settings
 from app.database import init_db, get_engine, check_db_connection
-from app.models import Base
+from app.models import Base, ImportTask
 from app.routes import chat, models, knowledge, tasks
 
 # Import pgvector extensions
@@ -81,6 +81,42 @@ async def lifespan(app: FastAPI):
         print("Database initialization timed out (15s). Application starting with limited functionality.")
     elif db_initialized:
         print("Database initialization completed")
+    
+    # 修复 zombie_task：系统重启后清理"僵尸"任务（被中断但仍显示 RUNNING 的任务）
+    if db_initialized:
+        try:
+            from app.database import get_db_session_factory
+            from app.models import TaskStatus
+            from datetime import datetime
+            
+            SessionLocal = get_db_session_factory()
+            db = SessionLocal()
+            
+            # 查找所有状态为 RUNNING 的任务
+            running_tasks = db.query(ImportTask).filter(ImportTask.status == TaskStatus.RUNNING).all()
+            
+            if running_tasks:
+                print(f"Found {len(running_tasks)} zombie task(s) from previous session, resetting to FAILED...")
+                
+                for task in running_tasks:
+                    task.status = TaskStatus.FAILED
+                    task.error_message = "Task was interrupted by system restart"
+                    task.completed_at = datetime.now()
+                    # 添加日志
+                    if task.task_logs is None:
+                        task.task_logs = []
+                    task.task_logs.append({
+                        "timestamp": datetime.now().isoformat(),
+                        "level": "warning",
+                        "message": "系统重启，任务被中断"
+                    })
+                
+                db.commit()
+                print(f"Successfully reset {len(running_tasks)} zombie task(s)")
+            
+            db.close()
+        except Exception as e:
+            print(f"Warning: Failed to clean up zombie tasks: {e}")
     
     print("Application started successfully!")
     print("API Documentation: http://localhost:8000/docs")

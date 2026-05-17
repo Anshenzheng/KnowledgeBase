@@ -12,29 +12,53 @@ import uuid
 class VectorDatabaseService:
     """Service for vector operations with pgvector"""
     
+    # 类级缓存，避免重复检测
+    _pgvector_available_cache: Optional[bool] = None
+    _engine_cache: Dict[str, Any] = {}
+    
     def __init__(self, db: Session):
         self.db = db
-        self.pgvector_available = self._check_pgvector()
+        self.pgvector_available = self._check_pgvector_cached()
     
-    def _check_pgvector(self) -> bool:
-        """Check if pgvector extension is available"""
-        from sqlalchemy import create_engine
-        from app.config import settings
+    @classmethod
+    def _check_pgvector_cached(cls) -> bool:
+        """Check if pgvector extension is available with caching"""
+        if cls._pgvector_available_cache is not None:
+            return cls._pgvector_available_cache
         
-        # Create a new connection to test pgvector
+        from sqlalchemy import create_engine
+        
         try:
             test_engine = create_engine(settings.DATABASE_URL)
             with test_engine.connect() as conn:
                 conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
                 conn.commit()
+            cls._pgvector_available_cache = True
             return True
         except Exception as e:
             logger = __import__('loguru').logger
             logger.warning(f"pgvector extension not available: {e}")
             logger.warning("Vector similarity search will be disabled")
+            cls._pgvector_available_cache = False
             return False
         finally:
-            test_engine.dispose()
+            if 'test_engine' in locals():
+                test_engine.dispose()
+    
+    @classmethod
+    def get_cached_engine(cls, db_url: str):
+        """获取缓存的数据库引擎，避免重复创建"""
+        if db_url not in cls._engine_cache:
+            from sqlalchemy import create_engine
+            cls._engine_cache[db_url] = create_engine(db_url)
+        return cls._engine_cache[db_url]
+    
+    @classmethod
+    def clear_engine_cache(cls):
+        """清理引擎缓存（用于测试或重新配置）"""
+        for engine in cls._engine_cache.values():
+            engine.dispose()
+        cls._engine_cache.clear()
     
     def create_embedding_table(self):
         """Create embedding table with pgvector extension"""
@@ -78,6 +102,42 @@ class VectorDatabaseService:
             logger = __import__('loguru').logger
             logger.error(f"Failed to store embedding: {e}")
             self.pgvector_available = False
+    
+    def store_batch_embeddings(self, chunk_ids: List[uuid.UUID], embeddings: List[List[float]]):
+        """
+        Batch store multiple embeddings in a single transaction
+        
+        注意：此方法不再 commit，由调用方统一 commit，避免双 commit 导致的不一致
+        """
+        if not self.pgvector_available or not chunk_ids:
+            return
+        
+        try:
+            params_list = []
+            for chunk_id, embedding in zip(chunk_ids, embeddings):
+                embedding_str = '[' + ','.join(map(str, embedding)) + ']'
+                params_list.append({
+                    "chunk_id": chunk_id,
+                    "embedding": embedding_str
+                })
+            
+            # 批量插入，使用单次事务
+            if params_list:
+                self.db.execute(
+                    text("""
+                        INSERT INTO knowledge_chunks_vector (chunk_id, embedding)
+                        VALUES (:chunk_id, CAST(:embedding AS vector))
+                        ON CONFLICT (chunk_id) DO UPDATE SET embedding = CAST(:embedding AS vector)
+                    """),
+                    params_list
+                )
+                # 修复 vector_commit：移除内部 commit，由调用方统一 commit
+                
+        except Exception as e:
+            logger = __import__('loguru').logger
+            logger.error(f"Failed to store batch embeddings: {e}")
+            self.pgvector_available = False
+            raise
     
     def similarity_search(
         self, 

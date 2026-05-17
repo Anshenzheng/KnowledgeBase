@@ -20,7 +20,10 @@ export interface ImportTask {
   input_path?: string;
   max_depth?: number;
   strategy?: 'skip' | 'overwrite' | 'add_new';
-  task_logs?: TaskLog[];
+  log_count?: number;
+  recent_logs?: TaskLog[];
+  task_logs?: TaskLog[]; // 保留向后兼容
+  expanded?: boolean; // UI 状态字段
 }
 
 export interface TaskLog {

@@ -24,7 +24,9 @@ aiohttp==3.9.1
 
 # Video Processing
 yt-dlp>=2024.1.26
-# openai-whisper==20231117  # 暂时注释，需要单独安装
+# openai-whisper 需要单独安装（推荐使用 UVR 版本或系统包）
+# Windows: pip install openai-whisper 或 pip install uvrspeech
+# Linux/Mac: pip install openai-whisper
 
 # Text Processing
 sentence-transformers==2.3.1

@@ -14,7 +14,7 @@ import socket
 
 
 class WebScraper:
-    """Recursive web scraper with controlled concurrency"""
+    """Recursive web scraper with controlled concurrency - Producer-Consumer pattern"""
 
     def __init__(self, max_depth: int = 5, max_pages: int = 100, max_concurrent: int = 5):
         self.max_depth = max_depth
@@ -23,38 +23,42 @@ class WebScraper:
         self.visited_urls: Set[str] = set()
         self._start_domain: Optional[str] = None
         self._client: Optional[httpx.AsyncClient] = None
+        self._dns_cache: Dict[str, bool] = {}  # DNS 缓存
+        self._max_html_size = 5 * 1024 * 1024  # 限制 HTML 最大 5MB
 
     def _get_start_domain(self, url: str) -> str:
         return urlparse(url).netloc.lower()
 
     def _is_same_domain(self, url: str) -> bool:
         if self._start_domain is None:
-            return False  # Fail-Closed
+            return False
         return urlparse(url).netloc.lower() == self._start_domain
 
     async def _is_private_ip_async(self, hostname: str) -> bool:
-        """Async DNS resolution with Fail-Closed policy using getaddrinfo"""
+        """Async DNS resolution with caching"""
+        if hostname in self._dns_cache:
+            return self._dns_cache[hostname]
+        
         try:
-            # Use asyncio's getaddrinfo for async DNS resolution
             loop = asyncio.get_event_loop()
-            # getaddrinfo returns (family, type, proto, canonname, sockaddr)
-            # sockaddr is (ip, port) for IPv4 or (ip, port, flowinfo, scope_id) for IPv6
             result = await loop.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
             
             for res in result:
                 try:
-                    ip = res[4][0]  # Extract IP from sockaddr
+                    ip = res[4][0]
                     ip_obj = ipaddress.ip_address(ip)
                     if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
                         logger.warning(f"Blocked access to internal IP: {ip_obj}")
+                        self._dns_cache[hostname] = True
                         return True
                 except (ValueError, IndexError):
                     continue
+            self._dns_cache[hostname] = False
             return False
         except Exception as e:
-            # Fail-Closed: DNS resolution failed, BLOCK the request
             logger.warning(f"DNS resolution failed for {hostname}: {e}, blocking request")
-            return True  # Block if DNS fails (security first)
+            self._dns_cache[hostname] = True
+            return True
 
     async def _is_allowed_url(self, url: str) -> bool:
         try:
@@ -79,7 +83,13 @@ class WebScraper:
 
         response = await self._client.get(url)
         response.raise_for_status()
-        return response.text
+        
+        html = response.text
+        if len(html) > self._max_html_size:
+            logger.warning(f"HTML too large for {url}, truncating to {self._max_html_size/1024/1024:.1f}MB")
+            html = html[:self._max_html_size]
+        
+        return html
 
     def _extract_links_from_soup(self, soup: BeautifulSoup, base_url: str) -> List[str]:
         links = []
@@ -146,22 +156,26 @@ class WebScraper:
         self,
         url: str,
         current_depth: int,
-        semaphore: asyncio.Semaphore,
-        on_page: Callable[[Dict], Awaitable[None]],
+        fetch_semaphore: asyncio.Semaphore,
+        page_queue: asyncio.Queue,
+        cancel_check_callback=None,  # 优化 web_fast_cancel：添加取消检查
     ) -> int:
+        """爬虫只负责抓取和提取，将结果放入队列"""
         if current_depth > self.max_depth:
             return 0
         
-        # 严格限制：如果已经达到上限，直接拦截
         if len(self.visited_urls) >= self.max_pages:
             return 0
         
-        async with semaphore:
-            # 再次进入双重校验，严格拦截并发溢出
+        # 优化 web_fast_cancel：检查取消
+        if cancel_check_callback and cancel_check_callback():
+            logger.info("Crawl cancelled by user, stopping early")
+            return 0
+        
+        async with fetch_semaphore:
             if len(self.visited_urls) >= self.max_pages:
                 return 0
             
-            # 进入临界区后，如果是新网页则立即占位
             if url in self.visited_urls:
                 return 0
             self.visited_urls.add(url)
@@ -175,21 +189,31 @@ class WebScraper:
                     return 0
 
                 page_data, child_links = self.extract_content(html, url)
-                await on_page(page_data)
+                
+                # 优化 web_fast_cancel：放入队列前检查取消
+                if cancel_check_callback and cancel_check_callback():
+                    logger.info("Crawl cancelled before queue put, skipping")
+                    return 0
+                
+                # 只将结果放入队列，不等待处理完成
+                await page_queue.put(page_data)
                 pages_added += 1
 
                 if current_depth >= self.max_depth:
                     return pages_added
 
-                child_coroutines = []
+                # 预检查并收集子链接
+                child_urls = []
                 for link in child_links:
-                    # 预检查：确保即将生成的子任务不会突破上限
                     if link not in self.visited_urls and len(self.visited_urls) < self.max_pages:
-                        child_coroutines.append(
-                            self.crawl(link, current_depth + 1, semaphore, on_page)
-                        )
+                        child_urls.append(link)
                 
-                if child_coroutines:
+                # 优化 web_fast_cancel：并发爬取子链接时传入取消检查
+                if child_urls:
+                    child_coroutines = [
+                        self.crawl(child_url, current_depth + 1, fetch_semaphore, page_queue, cancel_check_callback)
+                        for child_url in child_urls
+                    ]
                     results = await asyncio.gather(*child_coroutines, return_exceptions=True)
                     for result in results:
                         if isinstance(result, int):
@@ -203,24 +227,53 @@ class WebScraper:
                 logger.error(f"Error crawling {url}: {e}")
                 return pages_added
 
-    async def crawl_site(
+    async def crawl_site_producer_consumer(
         self,
         start_url: str,
-        on_page: Optional[Callable[[Dict], Awaitable[None]]] = None,
-    ) -> List[Dict]:
+        process_page: Callable[[Dict], Awaitable[None]],
+        num_workers: int = 3,
+        cancel_check_callback=None,  # 修复 web_stop_crawl：添加取消检查回调
+    ) -> int:
+        """生产者 - 消费者模式：爬虫只入队，worker 处理"""
         self.visited_urls.clear()
         self._start_domain = self._get_start_domain(start_url)
         logger.info(f"Starting crawl from {start_url}, domain={self._start_domain}")
         
-        results: Optional[List[Dict]] = [] if on_page is None else None
-
-        if on_page is None:
-            async def _on_page(page: Dict) -> None:
-                if results is not None:
-                    results.append(page)
-            on_page = _on_page
-
-        semaphore = asyncio.Semaphore(self.max_concurrent)
+        # 优化 web_4：队列添加背压，防止内存无限增长
+        page_queue: asyncio.Queue = asyncio.Queue(maxsize=50)  # 最多 50 个页面在队列中
+        fetch_semaphore = asyncio.Semaphore(self.max_concurrent)
+        processed_count = 0
+        crawl_done = asyncio.Event()
+        
+        async def worker(worker_id: int):
+            """消费者：从队列取数据并处理"""
+            nonlocal processed_count
+            logger.info(f"Worker {worker_id} started")
+            
+            while True:
+                try:
+                    # 修复 web_stop_crawl：检查取消
+                    if cancel_check_callback and cancel_check_callback():
+                        logger.info(f"Worker {worker_id} cancelled, stopping")
+                        break
+                    
+                    page_data = await page_queue.get()
+                    if page_data is None:  # 结束信号
+                        page_queue.task_done()
+                        break
+                    
+                    try:
+                        await process_page(page_data)
+                        processed_count += 1
+                    except Exception as e:
+                        logger.error(f"Worker {worker_id} failed to process page: {e}")
+                    finally:
+                        page_queue.task_done()
+                        
+                except asyncio.CancelledError:
+                    logger.info(f"Worker {worker_id} cancelled")
+                    break
+        
         limits = httpx.Limits(max_keepalive_connections=5, max_connections=self.max_concurrent)
 
         async with httpx.AsyncClient(
@@ -236,10 +289,40 @@ class WebScraper:
         ) as client:
             self._client = client
             try:
-                await self.crawl(start_url, 0, semaphore, on_page)
+                # 启动消费者 workers
+                workers = [asyncio.create_task(worker(i)) for i in range(num_workers)]
+                
+                # 优化 web_fast_cancel：启动生产者（爬虫）时传入取消检查
+                crawl_task = asyncio.create_task(
+                    self.crawl(start_url, 0, fetch_semaphore, page_queue, cancel_check_callback)
+                )
+                
+                # 等待爬虫完成
+                await crawl_task
+                
+                # 优化 queue_join_cancel：取消时清空队列，避免 join 长时间阻塞
+                if cancel_check_callback and cancel_check_callback():
+                    logger.info("Task cancelled, clearing queue to stop immediately")
+                    # 清空队列中剩余的页面
+                    while not page_queue.empty():
+                        try:
+                            page_queue.get_nowait()
+                            page_queue.task_done()
+                        except asyncio.QueueEmpty:
+                            break
+                
+                # 等待所有已入队的页面处理完成
+                await page_queue.join()
+                
+                # 发送结束信号给所有 worker
+                for _ in range(num_workers):
+                    await page_queue.put(None)
+                
+                # 等待所有 worker 结束
+                await asyncio.gather(*workers)
+                
             finally:
                 self._client = None
-                # 显式清理 DNS Resolver 防止文件句柄或内存泄漏
-                self._dns_resolver = None
+                self._dns_cache.clear()
 
-        return results if results is not None else []
+        return processed_count

@@ -1,8 +1,10 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, Inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { provideAnimations } from '@angular/platform-browser/animations';
 import { trigger, state, style, transition, animate } from '@angular/animations';
+import { MatDialogModule, MatDialog, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
+import { MatButtonModule } from '@angular/material/button';
 import { TaskService, TaskStatus, TaskType } from '../../services/task.service';
 import { ImportTask } from '../../services/knowledge.service';
 import { Subscription, interval } from 'rxjs';
@@ -11,7 +13,7 @@ import { switchMap } from 'rxjs/operators';
 @Component({
   selector: 'app-tasks',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, MatDialogModule, MatButtonModule],
   providers: [provideAnimations()],
   animations: [
     trigger('expandCollapse', [
@@ -23,7 +25,7 @@ import { switchMap } from 'rxjs/operators';
       state('expanded', style({
         height: '*',
         opacity: '1',
-        overflow: 'hidden'
+        overflow: 'visible'
       })),
       transition('collapsed <=> expanded', [
         animate('300ms ease-in-out')
@@ -79,7 +81,7 @@ import { switchMap } from 'rxjs/operators';
             <tbody>
               <ng-container *ngFor="let task of paginatedTasks">
                 <!-- 任务行 -->
-                <tr class="task-row" (click)="toggleExpand(task)" style="cursor: pointer;">
+                <tr class="task-row" [id]="'task-' + task.id" (click)="toggleExpand(task)" style="cursor: pointer;">
                   <td>
                     <div class="task-column-name">
                       <button class="btn-toggle-expand" (click)="toggleExpand(task); $event.stopPropagation()">
@@ -132,7 +134,7 @@ import { switchMap } from 'rxjs/operators';
                 </tr>
                 
                 <!-- 展开详情行 -->
-                <tr *ngIf="isExpanded(task)" class="detail-row-container">
+                <tr *ngIf="isExpanded(task)" class="detail-row-container" [id]="'detail-' + task.id">
                   <td colspan="4">
                     <div class="detail-wrapper" [@expandCollapse]="isExpanded(task) ? 'expanded' : 'collapsed'">
                       <div class="detail-content">
@@ -169,30 +171,12 @@ import { switchMap } from 'rxjs/operators';
                           <span class="error-message">{{ task.failed_items }}</span>
                         </div>
                         
-                        <!-- 执行日志 -->
-                        <div class="task-logs" *ngIf="task.task_logs && task.task_logs.length > 0">
-                          <h4 class="logs-title">
+                        <!-- 执行日志按钮 -->
+                        <div class="task-logs-action" *ngIf="task.log_count && task.log_count > 0">
+                          <button class="btn-action-default" (click)="openLogsDialog(task); $event.stopPropagation()">
                             <i class="fa-solid fa-list-ul"></i>
-                            执行日志 ({{ task.task_logs.length }})
-                          </h4>
-                          <div class="logs-container">
-                            <div class="log-entry" *ngFor="let log of task.task_logs" [class]="'log-' + log.level">
-                              <div class="log-header">
-                                <span class="log-time">{{ log.timestamp | date:'HH:mm:ss' }}</span>
-                                <span class="log-level-badge" [class]="'badge-' + log.level">
-                                  <i class="fa-solid" 
-                                     [class.fa-circle-info]="log.level === 'info'"
-                                     [class.fa-circle-check]="log.level === 'success'"
-                                     [class.fa-circle-exclamation]="log.level === 'warning'"
-                                     [class.fa-circle-xmark]="log.level === 'error'">
-                                  </i>
-                                  {{ getLogLevelName(log.level) }}
-                                </span>
-                              </div>
-                              <div class="log-message">{{ log.message }}</div>
-                              <div class="log-detail" *ngIf="log.detail">{{ log.detail | json }}</div>
-                            </div>
-                          </div>
+                            查看执行日志 ({{ task.log_count }})
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -241,12 +225,15 @@ import { switchMap } from 'rxjs/operators';
   `,
   styles: [`
     :host {
-      display: block;
+      display: flex;
+      flex-direction: column;
       height: 100%;
+      min-height: 0;
       overflow: hidden;
     }
 
     .main-header {
+      flex-shrink: 0;
       height: 56px;
       background: #ffffff;
       border-bottom: 1px solid #f0f0f0;
@@ -263,6 +250,7 @@ import { switchMap } from 'rxjs/operators';
 
     .content-body {
       flex: 1;
+      min-height: 0;
       padding: 24px;
       overflow-y: auto;
       display: flex;
@@ -531,7 +519,9 @@ import { switchMap } from 'rxjs/operators';
     }
 
     .detail-wrapper {
-      overflow: hidden;
+      overflow-x: visible;
+      overflow-y: auto;
+      max-height: min(60vh, 500px);
     }
 
     .detail-content {
@@ -566,6 +556,8 @@ import { switchMap } from 'rxjs/operators';
       border-radius: 4px;
       display: block;
       margin-top: 4px;
+      max-height: 200px;
+      overflow-y: auto;
     }
 
     /* 任务日志 */
@@ -740,21 +732,26 @@ import { switchMap } from 'rxjs/operators';
       cursor: not-allowed;
     }
 
-    /* 展开详情区域样式 */
-    .expandable-detail {
-      background-color: #fafafa;
-      border-bottom: 1px solid #f0f0f0;
-      margin: 0 24px;
+    /* 修复日志容器滚动问题 */
+    .logs-container {
+      background: #fff;
+      border: 1px solid #e8e8e8;
+      border-radius: 4px;
+      padding: 12px;
     }
 
-    .expandable-detail:last-child {
-      border-bottom: none;
+    /* 详情区域滚动条样式 */
+    .detail-wrapper::-webkit-scrollbar {
+      width: 8px;
     }
 
-    .detail-content {
-      padding: 16px 24px;
-      display: grid;
-      gap: 12px;
+    .detail-wrapper::-webkit-scrollbar-thumb {
+      background-color: #c1c1c1;
+      border-radius: 4px;
+    }
+
+    .detail-wrapper::-webkit-scrollbar-track {
+      background-color: #f0f0f0;
     }
   `]
 })
@@ -771,7 +768,10 @@ export class TasksComponent implements OnInit, OnDestroy {
   
   private refreshSubscription?: Subscription;
 
-  constructor(private taskService: TaskService) { }
+  constructor(
+    private taskService: TaskService,
+    private dialog: MatDialog
+  ) { }
 
   ngOnInit(): void {
     this.loadTasks();
@@ -789,8 +789,21 @@ export class TasksComponent implements OnInit, OnDestroy {
         this.typeFilter === 'all' ? undefined : this.typeFilter
       )))
       .subscribe(tasks => {
-        this.tasks = tasks;
-        this.currentPage = 0; // 重置到第一页
+        // 保留当前页码和展开状态，只更新任务数据
+        const currentTaskIds = new Set(this.tasks.map(t => t.id));
+        const expandedTaskIds = new Set(
+          this.tasks.filter(t => t.expanded).map(t => t.id)
+        );
+        
+        // 更新任务数据，但保留展开状态
+        this.tasks = tasks.map(task => {
+          const existingTask = this.tasks.find(t => t.id === task.id);
+          return {
+            ...task,
+            expanded: existingTask?.expanded || false
+          };
+        });
+        // 不重置页码，保持当前页
       });
   }
 
@@ -801,8 +814,14 @@ export class TasksComponent implements OnInit, OnDestroy {
       this.typeFilter === 'all' ? undefined : this.typeFilter
     ).subscribe({
       next: (tasks) => {
-        this.tasks = tasks;
-        this.currentPage = 0; // 重置到第一页
+        // 只在首次加载或筛选时重置页码，刷新时保持当前页
+        this.tasks = tasks.map(task => {
+          const existingTask = this.tasks.find(t => t.id === task.id);
+          return {
+            ...task,
+            expanded: existingTask?.expanded || false
+          };
+        });
         this.isLoading = false;
       },
       error: (error) => {
@@ -864,7 +883,50 @@ export class TasksComponent implements OnInit, OnDestroy {
   }
 
   toggleExpand(task: ImportTask): void {
-    this.expandedTaskId = this.expandedTaskId === task.id ? null : task.id;
+    if (this.expandedTaskId === task.id) {
+      // 关闭展开
+      this.expandedTaskId = null;
+    } else {
+      // 展开并加载完整日志
+      this.expandedTaskId = task.id;
+      this.loadTaskFullLogs(task);
+      
+      // 等待视图更新后滚动到详情容器
+      setTimeout(() => {
+        const detailElement = document.getElementById(`detail-${task.id}`);
+        if (detailElement) {
+          detailElement.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      }, 100);
+    }
+  }
+
+  loadTaskFullLogs(task: ImportTask): void {
+    // 加载任务的完整日志
+    this.taskService.getTask(task.id).subscribe({
+      next: (detail) => {
+        // 更新该任务的日志为完整日志
+        const taskIndex = this.tasks.findIndex(t => t.id === task.id);
+        if (taskIndex !== -1) {
+          this.tasks[taskIndex] = {
+            ...this.tasks[taskIndex],
+            task_logs: detail.task_logs,
+            log_count: detail.task_logs?.length || 0
+          };
+        }
+        
+        // 日志加载完成后，再次滚动确保底部可见
+        setTimeout(() => {
+          const detailElement = document.getElementById(`detail-${task.id}`);
+          if (detailElement) {
+            detailElement.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }
+        }, 100);
+      },
+      error: (error) => {
+        console.error('Error loading task logs:', error);
+      }
+    });
   }
 
   isExpanded(task: ImportTask): boolean {
@@ -938,6 +1000,252 @@ export class TasksComponent implements OnInit, OnDestroy {
       default: return '其他';
     }
   }
+
+  getLogLevelName(level: string): string {
+    switch (level) {
+      case 'info': return '信息';
+      case 'success': return '成功';
+      case 'warning': return '警告';
+      case 'error': return '错误';
+      default: return level;
+    }
+  }
+
+  openLogsDialog(task: ImportTask): void {
+    // 加载任务的完整日志
+    this.taskService.getTask(task.id).subscribe({
+      next: (detail) => {
+        this.dialog.open(TaskLogsDialogComponent, {
+          width: '800px',
+          maxWidth: '90vw',
+          maxHeight: '80vh',
+          data: {
+            taskName: task.task_name,
+            logs: detail.task_logs || []
+          }
+        });
+      },
+      error: (error) => {
+        console.error('Error loading task logs:', error);
+        alert('加载日志失败');
+      }
+    });
+  }
+}
+
+// 日志弹窗组件
+@Component({
+  selector: 'app-task-logs-dialog',
+  standalone: true,
+  imports: [CommonModule, MatDialogModule, MatButtonModule],
+  template: `
+    <div class="dialog-header">
+      <h2 class="dialog-title">
+        <i class="fa-solid fa-list-ul"></i>
+        执行日志 - {{ data.taskName }}
+      </h2>
+      <button class="btn-icon" mat-icon-button (click)="dialogRef.close()">
+        <i class="fa-solid fa-times"></i>
+      </button>
+    </div>
+    
+    <div class="dialog-content">
+      <div class="logs-container">
+        <div class="log-entry" *ngFor="let log of data.logs" [class]="'log-' + log.level">
+          <div class="log-header">
+            <span class="log-time">{{ log.timestamp | date:'yyyy-MM-dd HH:mm:ss' }}</span>
+            <span class="log-level-badge" [class]="'badge-' + log.level">
+              <i class="fa-solid" 
+                 [class.fa-circle-info]="log.level === 'info'"
+                 [class.fa-circle-check]="log.level === 'success'"
+                 [class.fa-circle-exclamation]="log.level === 'warning'"
+                 [class.fa-circle-xmark]="log.level === 'error'">
+              </i>
+              {{ getLogLevelName(log.level) }}
+            </span>
+          </div>
+          <div class="log-message">{{ log.message }}</div>
+          <div class="log-detail" *ngIf="log.detail">{{ log.detail | json }}</div>
+        </div>
+        
+        <div *ngIf="!data.logs || data.logs.length === 0" class="empty-state">
+          <i class="fa-regular fa-folder-open"></i>
+          <p>暂无执行日志</p>
+        </div>
+      </div>
+    </div>
+    
+    <div class="dialog-actions">
+      <button mat-button (click)="dialogRef.close()">关闭</button>
+    </div>
+  `,
+  styles: [`
+    .dialog-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 24px;
+      border-bottom: 1px solid #f0f0f0;
+      background: #fff;
+    }
+
+    .dialog-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #1f1f1f;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .dialog-content {
+      padding: 24px;
+      max-height: calc(80vh - 140px);
+      overflow-y: auto;
+    }
+
+    .logs-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .log-entry {
+      padding: 12px;
+      border-radius: 4px;
+      border-left: 3px solid;
+      background: #fafafa;
+    }
+
+    .log-info {
+      border-left-color: #1677ff;
+      background: #e6f4ff;
+    }
+
+    .log-success {
+      border-left-color: #52c41a;
+      background: #f6ffed;
+    }
+
+    .log-warning {
+      border-left-color: #faad14;
+      background: #fffbe6;
+    }
+
+    .log-error {
+      border-left-color: #ff4d4f;
+      background: #fff2f0;
+    }
+
+    .log-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .log-time {
+      font-size: 12px;
+      color: #8c8c8c;
+    }
+
+    .log-level-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .badge-info {
+      background: #1677ff;
+      color: #fff;
+    }
+
+    .badge-success {
+      background: #52c41a;
+      color: #fff;
+    }
+
+    .badge-warning {
+      background: #faad14;
+      color: #fff;
+    }
+
+    .badge-error {
+      background: #ff4d4f;
+      color: #fff;
+    }
+
+    .log-message {
+      font-size: 14px;
+      color: #262626;
+      line-height: 1.6;
+      word-break: break-word;
+    }
+
+    .log-detail {
+      margin-top: 8px;
+      padding: 8px;
+      background: rgba(0, 0, 0, 0.05);
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+      color: #595959;
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: #8c8c8c;
+    }
+
+    .empty-state i {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 16px 24px;
+      border-top: 1px solid #f0f0f0;
+      background: #fff;
+    }
+
+    .btn-icon {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 8px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s;
+    }
+
+    .btn-icon:hover {
+      background: #f5f5f5;
+    }
+
+    .btn-icon i {
+      font-size: 16px;
+      color: #8c8c8c;
+    }
+  `]
+})
+export class TaskLogsDialogComponent {
+  constructor(
+    public dialogRef: MatDialogRef<TaskLogsDialogComponent>,
+    @Inject(MAT_DIALOG_DATA) public data: { taskName: string; logs: any[] }
+  ) {}
 
   getLogLevelName(level: string): string {
     switch (level) {

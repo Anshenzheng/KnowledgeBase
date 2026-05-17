@@ -14,6 +14,7 @@ from datetime import datetime
 from app.database import get_db
 from app.config import settings
 from app.models import ImportType, ImportStrategy, ImportTask, TaskStatus
+from loguru import logger
 
 # 规范化：将可能引起循环引用的核心调度函数在顶部导入（确保后台任务模块已解耦）
 from app.routes.tasks import create_import_task
@@ -93,11 +94,11 @@ async def import_web_knowledge(
 
 @router.post("/upload/video")
 async def upload_video(
+    background_tasks: BackgroundTasks,
     video: UploadFile = File(...),
     task_name: str = None,
     strategy: ImportStrategy = ImportStrategy.SKIP,
-    db: Session = Depends(get_db),
-    background_tasks: BackgroundTasks = None
+    db: Session = Depends(get_db)
 ):
     """Upload and import a video file for transcription and knowledge extraction"""
     supported_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v']
@@ -122,7 +123,7 @@ async def upload_video(
     # 保存视频文件 - 使用流式写入避免内存溢出
     file_path = task_isolated_dir / video_filename
     try:
-        max_file_size = 500 * 1024 * 1024  # 限制最大 500MB
+        max_file_size = 1024 * 1024 * 1024  # 限制最大 1GB
         total_size = 0
         chunk_size = 1024 * 1024  # 每次写入 1MB
         
@@ -131,13 +132,25 @@ async def upload_video(
                 buffer.write(chunk)
                 total_size += len(chunk)
                 
-                # 内存保护：超过限制大小后停止写入
+                # 内存保护：超过限制大小后停止写入并清理
                 if total_size > max_file_size:
                     logger.warning(f"Video file exceeds {max_file_size/1024/1024:.1f}MB limit")
-                    break
+                    # 清理不完整的文件
+                    buffer.close()
+                    if os.path.exists(file_path):
+                        await anyio.to_thread.run_sync(os.remove, file_path)
+                    if os.path.exists(task_isolated_dir):
+                        await anyio.to_thread.run_sync(shutil.rmtree, task_isolated_dir)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Video file too large. Maximum size is {max_file_size/1024/1024:.0f}MB"
+                    )
         
         logger.info(f"Video file saved: {file_path}, size: {total_size/1024/1024:.2f}MB")
         
+    except HTTPException:
+        # 重新抛出 HTTP 异常（如 413）
+        raise
     except Exception as e:
         logger.error(f"Failed to save video file: {e}")
         if os.path.exists(task_isolated_dir):
@@ -147,7 +160,7 @@ async def upload_video(
     # 创建任务
     task = ImportTask(
         task_name=task_name or f"视频导入：{video.filename}",
-        task_type="video",
+        task_type=ImportType.VIDEO,
         status=TaskStatus.PENDING,
         input_path=str(file_path)
     )
@@ -162,14 +175,13 @@ async def upload_video(
             await anyio.to_thread.run_sync(shutil.rmtree, task_isolated_dir)
         raise HTTPException(status_code=500, detail=f"Database error: {str(db_err)}")
     
-    if background_tasks:
-        background_tasks.add_task(
-            create_import_task,
-            task_id=task.id,
-            import_type="video",
-            file_path=str(file_path),
-            strategy=strategy
-        )
+    background_tasks.add_task(
+        create_import_task,
+        task_id=task.id,
+        import_type="video",
+        file_path=str(file_path),
+        strategy=strategy
+    )
     
     return {
         "task_id": str(task.id),
@@ -277,11 +289,11 @@ async def import_video_knowledge(
 
 @router.post("/upload/file")
 async def upload_file(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     task_name: str = None,
     strategy: ImportStrategy = ImportStrategy.SKIP,
-    db: Session = Depends(get_db),
-    background_tasks: BackgroundTasks = None
+    db: Session = Depends(get_db)
 ):
     """Upload and import a single file safely to knowledge base"""
     supported_extensions = ['.pdf', '.docx', '.doc', '.txt', '.md', '.rst']
@@ -327,14 +339,13 @@ async def upload_file(
             await anyio.to_thread.run_sync(os.remove, file_path)
         raise HTTPException(status_code=500, detail=f"Database persistent failure, uploaded file rolled back: {str(db_err)}")
     
-    if background_tasks:
-        background_tasks.add_task(
-            create_import_task,
-            task_id=task.id,
-            import_type="local_file",
-            directory_path=file_path, # 传入单文件具体路径
-            strategy=strategy
-        )
+    background_tasks.add_task(
+        create_import_task,
+        task_id=task.id,
+        import_type="local_file",
+        directory_path=file_path, # 传入单文件具体路径
+        strategy=strategy
+    )
     
     return {
         "task_id": str(task.id),
@@ -347,11 +358,11 @@ async def upload_file(
 
 @router.post("/upload/files")
 async def upload_files(
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     task_name: str = None,
     strategy: ImportStrategy = ImportStrategy.SKIP,
-    db: Session = Depends(get_db),
-    background_tasks: BackgroundTasks = None
+    db: Session = Depends(get_db)
 ):
     """Upload and import multiple files using directory-level task isolation"""
     supported_extensions = ['.pdf', '.docx', '.doc', '.txt', '.md', '.rst']
@@ -416,16 +427,15 @@ async def upload_files(
         if os.path.exists(task_isolated_dir):
             await anyio.to_thread.run_sync(shutil.rmtree, task_isolated_dir)
         raise HTTPException(status_code=500, detail=f"Database mapping broken, isolated folder purged: {str(db_err)}")
-        
-    if background_tasks:
-        # 安全契约收敛：将隔离专属文件夹路径传入后台任务消费（避免传入未约定的 file_list 参数）
-        background_tasks.add_task(
-            create_import_task,
-            task_id=task.id,
-            import_type="local_file",
-            directory_path=task_isolated_dir, # 后台逻辑扫描该专属目录即可，天然实现多任务数据隔离
-            strategy=strategy
-        )
+    
+    # 安全契约收敛：将隔离专属文件夹路径传入后台任务消费（避免传入未约定的 file_list 参数）
+    background_tasks.add_task(
+        create_import_task,
+        task_id=task.id,
+        import_type="local_file",
+        directory_path=task_isolated_dir, # 后台逻辑扫描该专属目录即可，天然实现多任务数据隔离
+        strategy=strategy
+    )
         
     return {
         "task_id": str(task.id),

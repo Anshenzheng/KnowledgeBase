@@ -72,12 +72,13 @@ export class ChatComponent implements OnInit, OnDestroy {
   loadModels(): void {
     this.subscriptions.add(
       this.modelService.listModels().subscribe(models => {
-        this.models = models;
-        const defaultModel = models.find(m => m.is_default);
+        // 只加载 Chat 模型，过滤掉 Embedding 模型
+        this.models = models.filter(m => m.model_type !== 'embedding');
+        const defaultModel = this.models.find(m => m.is_default);
         if (defaultModel) {
           this.selectedModelId = defaultModel.id;
-        } else if (models.length > 0) {
-          this.selectedModelId = models[0].id;
+        } else if (this.models.length > 0) {
+          this.selectedModelId = this.models[0].id;
         }
       })
     );
@@ -108,6 +109,17 @@ export class ChatComponent implements OnInit, OnDestroy {
 
   sendMessage(): void {
     if (!this.newMessage.trim() || this.isLoading) return;
+    
+    // 检查是否有可用的 Chat 模型
+    if (this.models.length === 0) {
+      this.snackBar.open('请先在"模型配置"页面添加 Chat 模型', '关闭', {
+        duration: 5000,
+        horizontalPosition: 'center',
+        verticalPosition: 'top',
+        panelClass: ['error-snackbar']
+      });
+      return;
+    }
 
     const message: Message = {
       role: 'user',
@@ -153,6 +165,18 @@ export class ChatComponent implements OnInit, OnDestroy {
         error: (error) => {
           console.error('Error sending message:', error);
           this.isLoading = false;
+          
+          // 显示错误提示
+          let errorMessage = '发送消息失败，请稍后重试';
+          if (error.status === 0) {
+            errorMessage = '无法连接到服务器，请检查网络连接';
+          } else if (error.status === 500) {
+            errorMessage = '服务器内部错误，请稍后重试';
+          } else if (error.error?.detail) {
+            errorMessage = error.error.detail;
+          }
+          
+          this.snackBar.open(errorMessage, '关闭', { duration: 5000 });
           setTimeout(() => this.scrollToBottom(), 100);
         }
       })

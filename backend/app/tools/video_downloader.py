@@ -21,9 +21,14 @@ class VideoDownloader:
         if not yt_dlp.utils.get_exe_version('ffmpeg'):
             logger.warning("ffmpeg is not installed or not in PATH. Video/Audio merging may fail!")
 
-    def download(self, url: str, output_template: Optional[str] = None) -> Dict:
+    def download(self, url: str, output_template: Optional[str] = None, cancel_check_callback=None, prefer_audio_only: bool = True, max_height: int = 720) -> Dict:
         """
         Download video from URL (Extract & Download in one single pass)
+        
+        Args:
+            cancel_check_callback: 可选的取消检查回调函数，用于在下载过程中检查是否被取消
+            prefer_audio_only: 优先下载音频（True）或视频（False），默认 True 以节省空间
+            max_height: 最大视频高度（720p/1080p），默认 720p
         """
         if output_template is None:
             output_template = os.path.join(self.output_dir, "%(title)s.%(ext)s")
@@ -35,32 +40,46 @@ class VideoDownloader:
             nonlocal real_filepath
             if d.get('status') == 'finished':
                 real_filepath = d.get('filename')
+            # 在下载过程中检查取消
+            elif d.get('status') == 'downloading':
+                if cancel_check_callback and cancel_check_callback():
+                    logger.info("Video download cancelled by user")
+                    raise InterruptedError("Download cancelled by user")
+
+        # 优化 1：优先下载音频或限制视频质量，减少磁盘占用和后续处理时间
+        if prefer_audio_only:
+            # 只下载最佳音频，体积减少 80%+（适合纯语音转录）
+            format_str = 'bestaudio/best'
+            merge_output_format = 'm4a'
+        else:
+            # 下载视频但限制最大高度（720p 足够）
+            format_str = f'bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]/best'
+            merge_output_format = 'mp4'
 
         ydl_opts = {
-            # 只下载单个最佳格式，避免需要 ffmpeg 合并音视频
-            'format': 'best',
+            # 优化下载策略：音频优先或限制高度
+            'format': format_str,
             'outtmpl': output_template,
-            # 如果需要合并，输出为 mp4
-            'merge_output_format': 'mp4',
+            # 合并输出格式
+            'merge_output_format': merge_output_format,
             'quiet': True,
-            'no_warnings': False,  # 保留警告便于排查
+            'no_warnings': False,
             'extract_flat': False,
             'progress_hooks': [ydl_hook],
-            # 禁用需要 ffmpeg 的功能
+            # 禁用需要 ffmpeg 的后处理（我们自己在 extract_audio 中处理）
             'postprocessors': [],
         }
         
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # 一步到位：提取的同时直接进行下载，效率提升一倍
                 info = ydl.extract_info(url, download=True)
                 
-                # 如果钩子没抓到，使用官方兜底方法解析
                 if not real_filepath or not os.path.exists(real_filepath):
                     real_filepath = ydl.prepare_filename(info)
-                    # 针对可能发生的 merge 行为做安全猜测
                     base, _ = os.path.splitext(real_filepath)
-                    if os.path.exists(f"{base}.mp4"):
+                    if os.path.exists(f"{base}.m4a"):
+                        real_filepath = f"{base}.m4a"
+                    elif os.path.exists(f"{base}.mp4"):
                         real_filepath = f"{base}.mp4"
 
                 return {
@@ -71,9 +90,17 @@ class VideoDownloader:
                     "upload_date": info.get('upload_date', ''),
                     "description": info.get('description', ''),
                     "file_path": real_filepath,
-                    "file_size": os.path.getsize(real_filepath) if os.path.exists(real_filepath) else 0
+                    "file_size": os.path.getsize(real_filepath) if os.path.exists(real_filepath) else 0,
+                    "is_audio_only": prefer_audio_only
                 }
         
+        except InterruptedError as ie:
+            logger.warning(f"Download interrupted: {ie}")
+            return {
+                "success": False,
+                "error": "Download cancelled by user",
+                "cancelled": True
+            }
         except Exception as e:
             logger.error(f"Failed to download video from {url}: {e}")
             return {

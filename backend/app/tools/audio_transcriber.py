@@ -16,6 +16,9 @@ from typing import Optional, Dict, List, Any
 class AudioTranscriber:
     """Extract audio from video and transcribe to text asynchronously without blocking the event loop"""
     
+    # 类级别的模型缓存，避免重复加载相同模型
+    _model_cache = {}
+    
     def __init__(self, model_size: str = "base", device: Optional[str] = None):
         """
         Initialize Whisper model inside synchronous safe wrapper
@@ -45,9 +48,16 @@ class AudioTranscriber:
             
         logger.info(f"Initializing Whisper Context. Target Model: {model_size} | Execution Device: {self.device}")
         
-        # 2. 预加载模型，推理精度根据运行设备自动转换 (CUDA 默认使用 fp16 提速)
-        self.model = whisper.load_model(model_size, device=self.device)
-        logger.success(f"Whisper model '{model_size}' loaded successfully on device: {self.device}")
+        # 2. 使用模型缓存避免重复加载（每个模型只加载一次）
+        cache_key = f"{model_size}_{self.device}"
+        if cache_key not in AudioTranscriber._model_cache:
+            logger.info(f"Loading Whisper model '{model_size}' for the first time (caching enabled)")
+            AudioTranscriber._model_cache[cache_key] = whisper.load_model(model_size, device=self.device)
+            logger.success(f"Whisper model '{model_size}' loaded and cached successfully on device: {self.device}")
+        else:
+            logger.info(f"Using cached Whisper model '{model_size}' on device: {self.device}")
+        
+        self.model = AudioTranscriber._model_cache[cache_key]
 
     def _extract_audio_sync(self, video_path: str, audio_output_path: str) -> str:
         """
@@ -98,9 +108,12 @@ class AudioTranscriber:
         # 借助 AnyIO 线程桥接器，把同步阻塞的 FFmpeg 进程移出 FastAPI 主事件循环
         return await anyio.to_thread.run_sync(self._extract_audio_sync, video_path, audio_output_path)
 
-    def _transcribe_sync(self, audio_path: str, language: Optional[str], verbose: bool) -> Dict[str, Any]:
+    def _transcribe_sync(self, audio_path: str, language: Optional[str], verbose: bool, cancel_check_callback=None) -> Dict[str, Any]:
         """
         同步 Whisper 推理计算内核（由独立工作线程池托管）
+        
+        Args:
+            cancel_check_callback: 可选的取消检查回调函数，用于中断长时间运行的转录任务
         """
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Target audio file to transcribe not found: {audio_path}")
@@ -108,7 +121,6 @@ class AudioTranscriber:
         options = {
             "task": "transcribe",
             "verbose": verbose,
-            # 异常防御：如果是 CPU 运行强制关闭 fp16 规避 PyTorch 报错阻断；GPU 则开启半精度全速飙车
             "fp16": True if self.device == "cuda" else False
         }
         
@@ -116,18 +128,45 @@ class AudioTranscriber:
             options["language"] = language
 
         logger.info(f"Whisper matrix inference triggered for asset: {Path(audio_path).name}")
-        result = self.model.transcribe(audio_path, **options)
         
-        # 结构化抽取清洗时间戳分片
+        # 优化 2：长音频分段转写，降低内存占用
+        try:
+            # 获取音频时长
+            import subprocess
+            result = subprocess.run(
+                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                 '-of', 'default=noprint_wrappers=1:nokey=1', audio_path],
+                capture_output=True, text=True
+            )
+            duration = float(result.stdout.strip())
+            
+            # 如果音频超过 30 分钟，使用分段转写
+            if duration > 1800:  # 30 分钟
+                logger.info(f"Long audio detected ({duration:.1f}s), using segmented transcription")
+                return self._transcribe_segmented(audio_path, options, cancel_check_callback)
+            
+            # 短音频直接转写
+            result = self.model.transcribe(audio_path, **options)
+            
+        except Exception as e:
+            logger.warning(f"Audio duration detection failed: {e}, using standard transcription")
+            result = self.model.transcribe(audio_path, **options)
+        
+        # 使用带取消检查的模型转写
         segments = []
         for segment in result.get("segments", []):
+            # 在每处理完一个 segment 后检查取消
+            if cancel_check_callback and cancel_check_callback():
+                logger.info("Transcription cancelled by user, stopping early")
+                break
+                
             segments.append({
                 "start": round(segment["start"], 2),
                 "end": round(segment["end"], 2),
                 "text": segment["text"].strip()
             })
             
-        # 修复时长失真漏洞：优先通过最后一片的结束标记获取真实的视频/音频总时常（规避空白无声段导致的 sum() 失真）
+        # 修复时长失真漏洞：优先通过最后一片的结束标记获取真实的视频/音频总时常
         total_duration = 0.0
         if segments:
             total_duration = segments[-1]["end"]
@@ -139,13 +178,102 @@ class AudioTranscriber:
             "segments": segments,
             "duration": round(total_duration, 2)
         }
+    
+    def _transcribe_segmented(self, audio_path: str, options: dict, cancel_check_callback=None) -> Dict[str, Any]:
+        """
+        分段转写长音频：每 30 分钟一段，避免内存溢出
+        
+        Args:
+            audio_path: 音频文件路径
+            options: Whisper 转写选项
+            cancel_check_callback: 取消检查回调
+        """
+        import subprocess
+        import tempfile
+        
+        # 获取音频时长
+        result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+             '-of', 'default=noprint_wrappers=1:nokey=1', audio_path],
+            capture_output=True, text=True
+        )
+        total_duration = float(result.stdout.strip())
+        
+        # 分段参数
+        segment_duration = 1800  # 30 分钟一段
+        segments = []
+        all_text = []
+        language = None
+        
+        logger.info(f"Splitting audio into {int(total_duration / segment_duration) + 1} segments")
+        
+        try:
+            for start_time in range(0, int(total_duration), segment_duration):
+                # 检查取消
+                if cancel_check_callback and cancel_check_callback():
+                    logger.info("Segmented transcription cancelled by user")
+                    break
+                
+                duration = min(segment_duration, total_duration - start_time)
+                logger.info(f"Processing segment {start_time/60:.1f}-{(start_time+duration)/60:.1f} min")
+                
+                # 使用 FFmpeg 切割音频段
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
+                    temp_path = tmp_file.name
+                
+                try:
+                    cmd = [
+                        'ffmpeg', '-i', audio_path, '-ss', str(start_time),
+                        '-t', str(duration), '-acodec', 'pcm_s16le',
+                        '-ar', '16000', '-ac', '1', '-y', temp_path
+                    ]
+                    subprocess.run(cmd, check=True, capture_output=True)
+                    
+                    # 转写当前段
+                    segment_result = self.model.transcribe(temp_path, **options)
+                    
+                    # 合并结果
+                    if language is None:
+                        language = segment_result.get("language")
+                    
+                    for segment in segment_result.get("segments", []):
+                        # 调整时间戳
+                        segments.append({
+                            "start": round(start_time + segment["start"], 2),
+                            "end": round(start_time + segment["end"], 2),
+                            "text": segment["text"].strip()
+                        })
+                    
+                    all_text.append(segment_result.get("text", ""))
+                    
+                finally:
+                    # 清理临时文件
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+            
+            return {
+                "success": True,
+                "text": "".join(all_text).strip(),
+                "language": language or "unknown",
+                "segments": segments,
+                "duration": round(total_duration, 2),
+                "segmented": True
+            }
+            
+        except Exception as e:
+            logger.error(f"Segmented transcription failed: {e}")
+            # 降级到标准转写
+            return self._transcribe_sync(audio_path, options.get("language"), options.get("verbose"), cancel_check_callback)
 
-    async def transcribe(self, audio_path: str, language: Optional[str] = None, verbose: bool = False) -> Dict[str, Any]:
+    async def transcribe(self, audio_path: str, language: Optional[str] = None, verbose: bool = False, cancel_check_callback=None) -> Dict[str, Any]:
         """
         异步非阻塞语音转文字模型推理
+        
+        Args:
+            cancel_check_callback: 可选的取消检查回调函数，用于中断长时间运行的转录任务
         """
         try:
-            return await anyio.to_thread.run_sync(self._transcribe_sync, audio_path, language, verbose)
+            return await anyio.to_thread.run_sync(self._transcribe_sync, audio_path, language, verbose, cancel_check_callback)
         except Exception as e:
             logger.error(f"Whisper engine inference step collapsed: {e}")
             return {
@@ -153,7 +281,7 @@ class AudioTranscriber:
                 "error": f"Transcription engine collapse: {str(e)}"
             }
 
-    async def process_video(self, video_path: str, language: Optional[str] = None, keep_audio: bool = False) -> Dict[str, Any]:
+    async def process_video(self, video_path: str, language: Optional[str] = None, keep_audio: bool = False, cancel_check_callback=None) -> Dict[str, Any]:
         """
         音视频处理全自动流水线：
         抽取无损 16kHz 单声道波形文件 -> 移交 STT 识别 -> 触发资源全自动自毁清理。
@@ -162,6 +290,7 @@ class AudioTranscriber:
             video_path: 目标视频文件的绝对或规范化坐标路径
             language: 目标语言的 ISO 编码简写（例如 'zh', 'en'）。设置为 None 则自动触发语种探测。
             keep_audio: 如果设置为 False，转录完毕后中间态产生的无损 .wav 格式音频流会在磁盘上被物理抹除，守护磁盘健康。
+            cancel_check_callback: 可选的取消检查回调函数，用于中断长时间运行的转录任务
         """
         audio_path = None
         try:
@@ -169,7 +298,7 @@ class AudioTranscriber:
             audio_path = await self.extract_audio(video_path)
             
             # 2. 流水线二阶段：异步非阻塞大模型矩阵识别
-            transcription = await self.transcribe(audio_path, language=language)
+            transcription = await self.transcribe(audio_path, language=language, cancel_check_callback=cancel_check_callback)
             
             if transcription["success"]:
                 transcription["video_path"] = video_path

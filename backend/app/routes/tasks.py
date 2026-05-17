@@ -1,6 +1,7 @@
 """
 Import Task Management API Routes
 """
+import asyncio  # 修复 tasks_import：添加 asyncio import
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -43,6 +44,8 @@ async def create_import_task(
                 logger.info(f"Processing {len(file_list)} files from list")
                 # Process each file in the list
                 all_results = []
+                has_cancelled = False  # 修复 batch_cancel：跟踪是否有取消
+                
                 for file_path in file_list:
                     result = await service.import_local_files(
                         task_id=task_id,
@@ -50,6 +53,10 @@ async def create_import_task(
                         strategy=kwargs.get("strategy")
                     )
                     all_results.append(result)
+                    
+                    # 修复 batch_cancel：检查是否有取消
+                    if result.get("cancelled"):
+                        has_cancelled = True
                 
                 # Aggregate results
                 result = {
@@ -57,6 +64,10 @@ async def create_import_task(
                     "total_files": len(file_list),
                     "results": all_results
                 }
+                
+                # 修复 batch_cancel：如果有取消，添加 cancelled 标志
+                if has_cancelled:
+                    result["cancelled"] = True
             else:
                 result = await service.import_local_files(
                     task_id=task_id,
@@ -80,7 +91,15 @@ async def create_import_task(
         if task:
             task.result_summary = result
             # Set task status based on result
-            if result.get("success"):
+            if result.get("cancelled"):
+                # 任务被用户取消
+                task.status = TaskStatus.CANCELLED
+                task.error_message = result.get("message", "Task was cancelled by user")
+            elif result.get("skipped") and result.get("success"):
+                # 修复 video_p1_5：SKIP 重复内容时，任务显示为 COMPLETED 但添加说明
+                task.status = TaskStatus.COMPLETED
+                task.error_message = result.get("message", "Content already exists, skipped")
+            elif result.get("success"):
                 task.status = TaskStatus.COMPLETED
             else:
                 task.status = TaskStatus.FAILED
@@ -88,6 +107,15 @@ async def create_import_task(
             task.completed_at = datetime.now()
             db.commit()
         
+    except asyncio.CancelledError:
+        # 修复 task_exception：单独处理 CancelledError，避免标为 FAILED
+        db = SessionLocal()
+        task = db.query(ImportTask).filter(ImportTask.id == task_id).first()
+        if task:
+            task.status = TaskStatus.CANCELLED
+            task.error_message = "Task was cancelled by user"
+            task.completed_at = datetime.now()
+            db.commit()
     except Exception as e:
         # Handle error
         db = SessionLocal()
@@ -129,6 +157,8 @@ async def list_tasks(
             "total_items": task.total_items,
             "processed_items": task.processed_items,
             "failed_items": task.failed_items,
+            "log_count": len(task.task_logs) if task.task_logs else 0,  # 只返回日志数量
+            "recent_logs": (task.task_logs or [])[-10:],  # 只返回最近 10 条日志
             "created_at": task.created_at,
             "started_at": task.started_at,
             "completed_at": task.completed_at,
@@ -203,6 +233,13 @@ async def cancel_task(
         task.status = TaskStatus.CANCELLED
         task.completed_at = datetime.now()
         db.commit()
+        
+        # 优化 web_2：同时设置内存标志，让下载/转写钩子快速响应
+        from app.services.knowledge_import import KnowledgeImportService
+        # 通过类实例设置取消标志（如果有实例的话）
+        # 注意：这里需要获取正在运行的 service 实例
+        # 简单方案：直接修改类变量
+        KnowledgeImportService._cancel_flags[task_id] = True
         
         return {"message": "Task cancelled successfully"}
     else:
